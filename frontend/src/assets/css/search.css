@@ -1,0 +1,119 @@
+.search-container {
+  display: flex;
+  gap: 2rem;
+  padding: 2rem;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.search-filters {
+  width: 300px;
+  background-color: white;
+  padding: 1.5rem;
+  border-radius: 12px;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+  height: fit-content;
+  position: sticky;
+  top: 90px;
+}
+
+.search-filters h2 {
+  color: var(--color-coffee);
+  margin-bottom: 1.5rem;
+  font-size: 2rem;
+  border-bottom: 2px solid var(--color-sunlight);
+  padding-bottom: 0.5rem;
+}
+
+.filter-group {
+  margin-bottom: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.filter-group label {
+  font-weight: 600;
+  color: var(--color-coffee);
+}
+
+.filter-group input[type="text"],
+.filter-group input[type="number"] {
+  padding: 0.6rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-family: var(--font-main);
+}
+
+.range-inputs {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.range-inputs input {
+  width: 100%;
+}
+
+.slider {
+  width: 100%;
+  accent-color: var(--color-matcha);
+}
+
+.apply-filters-btn {
+  width: 100%;
+  padding: 0.8rem;
+  background-color: var(--color-matcha);
+  color: white;
+  border-radius: 6px;
+  font-size: 1.2rem;
+  margin-top: 1rem;
+}
+
+.apply-filters-btn:hover {
+  background-color: #76864a;
+}
+
+.search-results {
+  flex: 1;
+}
+
+.results-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+}
+
+.results-header h2 {
+  font-size: 2.5rem;
+  color: var(--color-coffee);
+}
+
+.sort-select {
+  padding: 0.6rem;
+  border: 2px solid var(--color-sunlight);
+  border-radius: 6px;
+  font-family: var(--font-main);
+  background-color: white;
+  color: var(--color-coffee);
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.users-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 2rem;
+}
+
+@media (max-width: 868px) {
+  .search-container {
+    flex-direction: column;
+  }
+  
+  .search-filters {
+    width: 100%;
+    position: static;
+  }
+}

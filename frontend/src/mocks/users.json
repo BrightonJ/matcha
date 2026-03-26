@@ -1,0 +1,67 @@
+[
+  {
+    "id": 1,
+    "username": "LatteArtKing",
+    "firstName": "Julien",
+    "lastName": "Dubois",
+    "age": 28,
+    "gender": "male",
+    "fameRating": 85,
+    "location": "Paris, 11e",
+    "tags": ["#coffee", "#art", "#vegan"],
+    "profilePic": "https://i.pravatar.cc/300?img=11",
+    "isOnline": true
+  },
+  {
+    "id": 2,
+    "username": "MatchaQueen",
+    "firstName": "Sarah",
+    "lastName": "Martin",
+    "age": 24,
+    "gender": "female",
+    "fameRating": 92,
+    "location": "Paris, 3e",
+    "tags": ["#matcha", "#geek", "#piercing"],
+    "profilePic": "https://i.pravatar.cc/300?img=5",
+    "isOnline": false
+  },
+  {
+    "id": 3,
+    "username": "EspressoShot",
+    "firstName": "Marc",
+    "lastName": "Lefebvre",
+    "age": 31,
+    "gender": "male",
+    "fameRating": 45,
+    "location": "Lyon, Centre",
+    "tags": ["#sport", "#coffee", "#travel"],
+    "profilePic": "https://i.pravatar.cc/300?img=12",
+    "isOnline": true
+  },
+  {
+    "id": 4,
+    "username": "MochaVibes",
+    "firstName": "Emma",
+    "lastName": "Bernard",
+    "age": 27,
+    "gender": "female",
+    "fameRating": 78,
+    "location": "Paris, 11e",
+    "tags": ["#music", "#art", "#vegan"],
+    "profilePic": "https://i.pravatar.cc/300?img=1",
+    "isOnline": true
+  },
+  {
+    "id": 5,
+    "username": "PixelBrewer",
+    "firstName": "Alex",
+    "lastName": "Petit",
+    "age": 22,
+    "gender": "non-binary",
+    "fameRating": 60,
+    "location": "Bordeaux",
+    "tags": ["#geek", "#gaming", "#coffee"],
+    "profilePic": "https://i.pravatar.cc/300?img=3",
+    "isOnline": false
+  }
+]

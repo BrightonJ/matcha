@@ -1,0 +1,45 @@
+@import url('https://fonts.googleapis.com/css2?family=VT323&family=Inter:wght@400;600&display=swap');
+
+:root {
+  --color-cream: #F5EFEB;
+  --color-coffee: #4A3B32;
+  --color-matcha: #8A9A5B;
+  --color-sunlight: #FAD6A5;
+  --color-error: #D9534F;
+  --color-success: #5CB85C;
+
+  --font-pixel: 'VT323', monospace;
+  --font-main: 'Inter', sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--color-cream);
+  color: var(--color-coffee);
+  font-family: var(--font-main);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+h1, h2, h3 {
+  font-family: var(--font-pixel);
+  letter-spacing: 1px;
+}
+
+a {
+  text-decoration: none;
+  color: inherit;
+}
+
+button {
+  font-family: var(--font-pixel);
+  cursor: pointer;
+  border: none;
+  outline: none;
+}
