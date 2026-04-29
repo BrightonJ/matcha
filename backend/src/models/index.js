@@ -3,11 +3,13 @@ const tagModel = require('./tagModel');
 const photoModel = require('./photoModel');
 const locationModel = require('./locationModel');
 const searchModel = require('./searchModel');
+const likeModel = require('./likeModel');
 
 module.exports = {
   user: userModel,
   tag: tagModel,
   photo: photoModel,
   location: locationModel,
-  search: searchModel
+  search: searchModel,
+  like: likeModel
 };
