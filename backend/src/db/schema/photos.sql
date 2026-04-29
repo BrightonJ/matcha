@@ -1,0 +1,8 @@
+CREATE TABLE IF NOT EXISTS photos (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    url VARCHAR(255) NOT NULL,
+    is_profile BOOLEAN DEFAULT FALSE,
+    order_index INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT NOW()
+);

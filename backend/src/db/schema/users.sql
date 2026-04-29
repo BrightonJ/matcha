@@ -1,0 +1,22 @@
+CREATE TABLE IF NOT EXISTS users (
+    id SERIAL PRIMARY KEY,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    username VARCHAR(50) UNIQUE NOT NULL,
+    first_name VARCHAR(100) NOT NULL,
+    last_name VARCHAR(100) NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    is_verified BOOLEAN DEFAULT FALSE,
+    verification_token VARCHAR(255),
+    verification_expires TIMESTAMP,
+    bio TEXT,
+    gender VARCHAR(20),
+    sexual_preferences VARCHAR(20) DEFAULT 'bisexual',
+    latitude DECIMAL(10,8),
+    longitude DECIMAL(11,8),
+    location_city VARCHAR(100),
+    location_manual BOOLEAN DEFAULT FALSE,
+    popularity_score DECIMAL(5,2) DEFAULT 0,
+    last_seen TIMESTAMP DEFAULT NOW(),
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
