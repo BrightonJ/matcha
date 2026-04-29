@@ -17,7 +17,7 @@ const initDatabase = async () => {
 
   try {
     // Connexion à postgres
-	console.log("Connexion à PostgreSQL ...");
+    console.log("Connexion à PostgreSQL ...");
     client = new Client(config);
     await client.connect();
 
@@ -40,7 +40,8 @@ const initDatabase = async () => {
       "schema/users.sql",
       "schema/tags.sql",
       "schema/user_tags.sql",
-	  'schema/photos.sql',
+      "schema/photos.sql",
+      "schema/blocks.sql",
       "seeds/tags_seed.sql",
     ];
 
