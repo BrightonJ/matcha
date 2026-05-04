@@ -1,3 +1,15 @@
+/* ************************************************************************** */
+/*                                                                            */
+/*                                                        :::      ::::::::   */
+/*   likeModel.js                                       :+:      :+:    :+:   */
+/*                                                    +:+ +:+         +:+     */
+/*   By: jose <jose@student.42.fr>                  +#+  +:+       +#+        */
+/*                                                +#+#+#+#+#+   +#+           */
+/*   Created: 2026/05/04 09:58:29 by jose              #+#    #+#             */
+/*   Updated: 2026/05/04 10:10:29 by jose             ###   ########.fr       */
+/*                                                                            */
+/* ************************************************************************** */
+
 const pool = require("../db/pool");
 
 const likeModel = {
@@ -46,7 +58,7 @@ const likeModel = {
       [fromUserId, toUserId],
     );
 
-    // Vérifier si c'est un match (like réciproque)
+    // Vérifier si c'est un match
     const mutual = await pool.query(
       "SELECT * FROM likes WHERE from_user_id = $1 AND to_user_id = $2",
       [toUserId, fromUserId],
@@ -54,18 +66,29 @@ const likeModel = {
 
     const isMatch = mutual.rows.length > 0;
 
+    // Mettre à jour la popularité des deux utilisateurs
+    await this.updatePopularityScore(fromUserId);
+    await this.updatePopularityScore(toUserId);
+
     return {
       like: result.rows[0],
       isMatch,
     };
   },
 
-  // Supprimer un like (unlike)
+  // Supprimer un like
   async remove(fromUserId, toUserId) {
     const result = await pool.query(
       "DELETE FROM likes WHERE from_user_id = $1 AND to_user_id = $2 RETURNING *",
       [fromUserId, toUserId],
     );
+
+    if (result.rows.length) {
+      // Mettre à jour la popularité des deux utilisateurs
+      await this.updatePopularityScore(fromUserId);
+      await this.updatePopularityScore(toUserId);
+    }
+
     return result.rows[0] || null;
   },
 
@@ -131,13 +154,44 @@ const likeModel = {
     return result.rows;
   },
 
-  // Compter les likes reçus (pour la popularité)
+  // Compter les likes reçus
   async countReceivedLikes(userId) {
     const result = await pool.query(
       "SELECT COUNT(*) FROM likes WHERE to_user_id = $1",
       [userId],
     );
     return parseInt(result.rows[0].count);
+  },
+
+  // Recalculer le score de popularité d'un utilisateur
+  async updatePopularityScore(userId) {
+    // Compter les likes reçus
+    const likesReceived = await this.countReceivedLikes(userId);
+
+    // Compter les matchs
+    const matchesResult = await pool.query(
+      `SELECT COUNT(*) FROM (
+      SELECT l1.from_user_id 
+      FROM likes l1
+      JOIN likes l2 ON l1.from_user_id = l2.to_user_id AND l1.to_user_id = l2.from_user_id
+      WHERE l1.to_user_id = $1
+      GROUP BY l1.from_user_id
+    ) AS matches`,
+      [userId],
+    );
+    const matchCount = parseInt(matchesResult.rows[0].count);
+
+    let score = likesReceived * 20 + matchCount * 10;
+
+    if (score > 1000) score = 1000;
+
+    // Mettre à jour dans la base
+    await pool.query("UPDATE users SET popularity_score = $1 WHERE id = $2", [
+      score,
+      userId,
+    ]);
+
+    return score;
   },
 };
 
