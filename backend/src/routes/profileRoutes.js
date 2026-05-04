@@ -9,6 +9,9 @@ router.use(authMiddleware);
 router.get('/me', profileController.getMyProfile);
 router.put('/me', profileController.updateProfile);
 
+// Mes visiteurs
+router.get('/visitors', profileController.getMyVisitors);
+
 // Profil d'un autre utilisateur
 router.get('/:id', profileController.getUserProfile);
 
