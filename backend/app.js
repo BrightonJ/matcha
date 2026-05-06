@@ -1,6 +1,8 @@
 const express = require('express');
 const morgan = require('morgan');
 const path = require('path');
+const http = require('http');
+const { initSocket } = require('./src/socket');
 require('dotenv').config();
 
 // Importer les routes
@@ -11,6 +13,7 @@ const photoRoutes = require('./src/routes/photoRoutes');
 const locationRoutes = require('./src/routes/locationRoutes');
 const searchRoutes = require('./src/routes/searchRoutes');
 const likeRoutes = require('./src/routes/likeRoutes');
+const messageRoutes = require('./src/routes/messageRoutes');
 
 const PORT = process.env.PORT;
 const app = express();
@@ -29,7 +32,13 @@ app.use('/api/photos', photoRoutes);
 app.use('/api/location', locationRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/likes', likeRoutes);
+app.use('/api/messages', messageRoutes);
 
-app.listen(PORT, () => {
+const server = http.createServer(app);
+
+initSocket(server);
+
+server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
+  console.log(`WebSocket ready`);
 });

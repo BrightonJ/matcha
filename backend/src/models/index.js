@@ -5,6 +5,7 @@ const locationModel = require('./locationModel');
 const searchModel = require('./searchModel');
 const likeModel = require('./likeModel');
 const visitModel = require('./visitModel');
+const messageModel = require('./messageModel');
 
 module.exports = {
   user: userModel,
@@ -13,5 +14,6 @@ module.exports = {
   location: locationModel,
   search: searchModel,
   like: likeModel,
-  visit: visitModel
+  visit: visitModel,
+  message: messageModel
 };

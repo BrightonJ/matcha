@@ -44,6 +44,7 @@ const initDatabase = async () => {
       "schema/blocks.sql",
       'schema/likes.sql',
       'schema/visits.sql',
+      'schema/messages.sql',
       "seeds/tags_seed.sql",
     ];
 
