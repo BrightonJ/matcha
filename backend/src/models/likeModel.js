@@ -1,16 +1,6 @@
-/* ************************************************************************** */
-/*                                                                            */
-/*                                                        :::      ::::::::   */
-/*   likeModel.js                                       :+:      :+:    :+:   */
-/*                                                    +:+ +:+         +:+     */
-/*   By: jose <jose@student.42.fr>                  +#+  +:+       +#+        */
-/*                                                +#+#+#+#+#+   +#+           */
-/*   Created: 2026/05/04 09:58:29 by jose              #+#    #+#             */
-/*   Updated: 2026/05/04 10:10:29 by jose             ###   ########.fr       */
-/*                                                                            */
-/* ************************************************************************** */
-
 const pool = require("../db/pool");
+const notificationModel = require("./notificationModel");
+const userModel = require("./userModel");
 
 const likeModel = {
   // Ajouter un like
@@ -70,6 +60,46 @@ const likeModel = {
     await this.updatePopularityScore(fromUserId);
     await this.updatePopularityScore(toUserId);
 
+    // Créer une notification de like
+    const fromUser = await userModel.findById(fromUserId);
+    const notification = await notificationModel.create(
+      toUserId,
+      "like",
+      fromUserId,
+      `${fromUser.username} vous a liké`,
+      { likeId: result.rows[0].id },
+    );
+
+    // Envoyer en temps réel
+    const io = global.io;
+    if (!io) {
+      throw new Error("Socket.io not initialized");
+    }
+    io.to(`user:${toUserId}`).emit("notification", notification);
+
+    // Si c'est un match, créer une notification de match
+    if (isMatch) {
+      const toUser = await userModel.findById(toUserId);
+      const matchNotification = await notificationModel.create(
+        fromUserId,
+        "match",
+        toUserId,
+        `${toUser.username} vous a liké en retour ! C'est un match !`,
+        { match: true },
+      );
+      io.to(`user:${fromUserId}`).emit("notification", matchNotification);
+
+      const fromUser = await userModel.findById(fromUserId);
+      const matchNotification2 = await notificationModel.create(
+        toUserId,
+        "match",
+        fromUserId,
+        `${fromUser.username} vous a liké en retour ! C'est un match !`,
+        { match: true },
+      );
+      io.to(`user:${toUserId}`).emit("notification", matchNotification2);
+    }
+
     return {
       like: result.rows[0],
       isMatch,
@@ -87,6 +117,21 @@ const likeModel = {
       // Mettre à jour la popularité des deux utilisateurs
       await this.updatePopularityScore(fromUserId);
       await this.updatePopularityScore(toUserId);
+
+      // Créer une notification d'unlike
+      const fromUser = await userModel.findById(fromUserId);
+      const notification = await notificationModel.create(
+        toUserId,
+        "unlike",
+        fromUserId,
+        `${fromUser.username} a retiré son like`,
+        { unlike: true },
+      );
+      const io = global.io;
+      if (!io) {
+        throw new Error("Socket.io not initialized");
+      }
+      io.to(`user:${toUserId}`).emit("notification", notification);
     }
 
     return result.rows[0] || null;

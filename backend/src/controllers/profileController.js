@@ -1,4 +1,4 @@
-const { user: userModel, visit: visitModel } = require("../models");
+const { user: userModel, visit: visitModel, notification: notificationModel } = require("../models");
 
 // Récupérer son propre profil
 const getMyProfile = async (req, res) => {
@@ -38,6 +38,22 @@ const getUserProfile = async (req, res) => {
     // Enregistrer la visite
     await visitModel.add(req.userId, userId);
 
+    // Créer une notification de visite
+    const visitor = await userModel.findById(req.userId);
+    const notification = await notificationModel.create(
+      userId, // visited_id
+      "visit",
+      req.userId, // visitor_id
+      `${visitor.username} a consulté votre profil`,
+      { visited: true },
+    );
+
+    const io = global.io;
+    if (!io) {
+      throw new Error("Socket.io not initialized");
+    }
+    io.to(`user:${userId}`).emit("notification", notification);
+
     // Ne pas renvoyer le mot de passe
     const { password_hash, ...userWithoutPassword } = user;
 
@@ -54,8 +70,8 @@ const getMyVisitors = async (req, res) => {
     const visitors = await visitModel.getMyVisitors(req.userId);
     res.json(visitors);
   } catch (error) {
-    console.error('Erreur:', error);
-    res.status(500).json({ error: 'Erreur serveur' });
+    console.error("Erreur:", error);
+    res.status(500).json({ error: "Erreur serveur" });
   }
 };
 

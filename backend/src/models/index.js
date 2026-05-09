@@ -6,6 +6,7 @@ const searchModel = require('./searchModel');
 const likeModel = require('./likeModel');
 const visitModel = require('./visitModel');
 const messageModel = require('./messageModel');
+const notificationModel = require('./notificationModel');
 
 module.exports = {
   user: userModel,
@@ -15,5 +16,6 @@ module.exports = {
   search: searchModel,
   like: likeModel,
   visit: visitModel,
-  message: messageModel
+  message: messageModel,
+  notification: notificationModel
 };
