@@ -1,33 +1,9 @@
 const pool = require('../db/pool');
+const blockModel = require('./blockModel');
 
 const messageModel = {
   // Envoyer un message
   async send(fromUserId, toUserId, content) {
-    // Vérifier que les deux utilisateurs sont matchés
-    const matchCheck = await pool.query(
-      `SELECT * FROM likes l1
-       JOIN likes l2 ON l1.from_user_id = l2.to_user_id AND l1.to_user_id = l2.from_user_id
-       WHERE (l1.from_user_id = $1 AND l1.to_user_id = $2)
-       OR (l1.from_user_id = $2 AND l1.to_user_id = $1)`,
-      [fromUserId, toUserId]
-    );
-    
-    if (matchCheck.rows.length === 0) {
-      throw new Error('Vous devez être matché pour envoyer un message');
-    }
-    
-    // Vérifier que personne n'est bloqué
-    const blockCheck = await pool.query(
-      `SELECT * FROM blocks 
-       WHERE (blocker_id = $1 AND blocked_id = $2)
-       OR (blocker_id = $2 AND blocked_id = $1)`,
-      [fromUserId, toUserId]
-    );
-    
-    if (blockCheck.rows.length > 0) {
-      throw new Error('Vous ne pouvez pas envoyer de message à cet utilisateur');
-    }
-    
     // Insérer le message
     const result = await pool.query(
       `INSERT INTO messages (from_user_id, to_user_id, content)

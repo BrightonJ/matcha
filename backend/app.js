@@ -15,6 +15,7 @@ const searchRoutes = require("./src/routes/searchRoutes");
 const likeRoutes = require("./src/routes/likeRoutes");
 const messageRoutes = require("./src/routes/messageRoutes");
 const notificationRoutes = require("./src/routes/notificationRoutes");
+const blockRoutes = require('./src/routes/blockRoutes');
 
 const PORT = process.env.PORT;
 const app = express();
@@ -35,6 +36,7 @@ app.use("/api/search", searchRoutes);
 app.use("/api/likes", likeRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/blocks", blockRoutes);
 
 const server = http.createServer(app);
 

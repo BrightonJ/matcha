@@ -1,4 +1,9 @@
-const { user: userModel, visit: visitModel, notification: notificationModel } = require("../models");
+const {
+  user: userModel,
+  visit: visitModel,
+  notification: notificationModel,
+  block: blockModel,
+} = require("../models");
 
 // Récupérer son propre profil
 const getMyProfile = async (req, res) => {
@@ -35,6 +40,14 @@ const getUserProfile = async (req, res) => {
       return res.status(404).json({ error: "Utilisateur non trouvé" });
     }
 
+    // Verifier si l'utilisateur est bloqué ou a bloqué
+    const blockedHim = await blockModel.isBlocked(req.userId, userId);
+    const blockedByHim = await blockModel.isBlocked(userId, req.userId);
+
+    if (blockedHim || blockedByHim) {
+      return res.status(403).json({ error: "Vous ne pouvez pas consulter ce profil" });
+    }
+
     // Enregistrer la visite
     await visitModel.add(req.userId, userId);
 
@@ -50,7 +63,9 @@ const getUserProfile = async (req, res) => {
 
     const io = global.io;
     if (!io) {
-      throw new Error("Socket.io not initialized");
+      const error = new Error("Socket.io not initialized");
+      error.code = "SOCKET_IO_NOT_INITIALIZED";
+      throw error;
     }
     io.to(`user:${userId}`).emit("notification", notification);
 

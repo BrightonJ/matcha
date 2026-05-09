@@ -73,7 +73,9 @@ const likeModel = {
     // Envoyer en temps réel
     const io = global.io;
     if (!io) {
-      throw new Error("Socket.io not initialized");
+      const error = new Error("Socket.io not initialized");
+      error.code = "SOCKET_IO_NOT_INITIALIZED";
+      throw error;
     }
     io.to(`user:${toUserId}`).emit("notification", notification);
 
@@ -129,7 +131,9 @@ const likeModel = {
       );
       const io = global.io;
       if (!io) {
-        throw new Error("Socket.io not initialized");
+        const error = new Error("Socket.io not initialized");
+        error.code = "SOCKET_IO_NOT_INITIALIZED";
+        throw error;
       }
       io.to(`user:${toUserId}`).emit("notification", notification);
     }

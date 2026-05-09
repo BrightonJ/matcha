@@ -1,4 +1,5 @@
 const { like } = require("../models");
+const { block: blockModel } = require("../models");
 
 // Liker un utilisateur
 const addLike = async (req, res) => {
@@ -14,6 +15,14 @@ const addLike = async (req, res) => {
       return res
         .status(400)
         .json({ error: "Vous ne pouvez pas vous liker vous-même" });
+    }
+
+    // Vérifier si l'un des deux a bloqué l'autre
+    const blockedHim = await blockModel.isBlocked(req.userId, toUserId);
+    const blockedByHim = await blockModel.isBlocked(toUserId, req.userId);
+
+    if (blockedHim || blockedByHim) {
+      return res.status(403).json({ error: "Vous ne pouvez pas liker ce profil" });
     }
 
     const result = await like.add(req.userId, toUserId);

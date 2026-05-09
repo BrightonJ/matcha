@@ -2,6 +2,8 @@ const {
   user: userModel,
   message: messageModel,
   notification: notificationModel,
+  like: likeModel,
+  block: blockModel,
 } = require("../models");
 
 // Envoyer un message à un utilisateur
@@ -15,6 +17,19 @@ const sendMessage = async (req, res) => {
       return res
         .status(400)
         .json({ error: "Le message ne peut pas être vide" });
+    }
+
+    // Vérifier que les deux utilisateurs sont matchés
+    const isMatch = await likeModel.isMatch(fromUserId, parseInt(toUserId));
+    if (!isMatch) {
+      return res.status(403).json({ error: "Vous devez être matché pour envoyer un message" });
+    }
+    
+    // Vérifier que personne n'est bloqué
+    const blockedHim = await blockModel.isBlocked(fromUserId, parseInt(toUserId));
+    const blockedByHim = await blockModel.isBlocked(parseInt(toUserId), fromUserId);
+    if (blockedHim || blockedByHim) {
+      return res.status(403).json({ error: "Vous ne pouvez pas envoyer de message à cet utilisateur" });
     }
 
     const newMessage = await messageModel.send(
@@ -35,7 +50,9 @@ const sendMessage = async (req, res) => {
 
     const io = global.io;
     if (!io) {
-       throw new Error("Socket.io not initialized");
+      const error = Error("Socket.io not initialized");
+      error.code = "SOCKET_IO_NOT_INITIALIZED";
+      throw error;
     }
     io.to(`user:${toUserId}`).emit("notification", notification);
 
