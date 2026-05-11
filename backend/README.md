@@ -211,7 +211,7 @@ socket.emit('send_message',
 ## 🛠️ Scripts disponibles
 
 | Événement     | Description |
-|---------------|-------------|-------------|
+|---------------|-------------|
 | npm run dev | Démarrer en développement (nodemon) |
 | npm start | Démarrer en production |
 | npm run init-db Réinitialiser la base de données |
