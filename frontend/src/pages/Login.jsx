@@ -11,7 +11,8 @@ function Login() {
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [registrationSuccess, setRegistrationSuccess] = useState(false);
   const [resetSent, setResetSent] = useState(false);
-  
+  const [isLoading, setIsLoading] = useState(false);
+
   const [formData, setFormData] = useState({
     email: '',
     firstName: '',
@@ -21,8 +22,8 @@ function Login() {
   });
   const [resetEmail, setResetEmail] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
-  
-  const { login } = useAuth();
+
+  const { register, login } = useAuth();
   const navigate = useNavigate();
 
   const handleInputChange = (e) => {
@@ -35,33 +36,56 @@ function Login() {
     if (password.length < 8) return "Password must be at least 8 characters long.";
     if (!/[A-Z]/.test(password)) return "Password must contain an uppercase letter.";
     if (!/[0-9]/.test(password)) return "Password must contain a number.";
-    
+
     const lowerPass = password.toLowerCase();
     const containsForbidden = FORBIDDEN_WORDS.some(word => lowerPass.includes(word));
     if (containsForbidden) return "Password contains a common or forbidden word.";
-    
+
     return null;
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setErrorMsg('');
+    setIsLoading(true);
 
     if (isRegister) {
       const passError = validatePassword(formData.password);
       if (passError) {
         setErrorMsg(passError);
+        setIsLoading(false);
         return;
       }
-      setRegistrationSuccess(true);
+
+      const result = await register({
+        email: formData.email,
+        username: formData.username,
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+        password: formData.password
+      });
+
+      if (result.success) {
+        setRegistrationSuccess(true);
+      } else {
+        setErrorMsg(result.error);
+      }
     } else {
       if (!formData.username || !formData.password) {
         setErrorMsg("Please fill in all fields.");
+        setIsLoading(false);
         return;
       }
-      login({ username: formData.username, token: 'fake-jwt-token-login' });
-      navigate('/search');
+
+      const result = await login(formData.username, formData.password);
+
+      if (result.success) {
+        navigate('/search');
+      } else {
+        setErrorMsg(result.error);
+      }
     }
+    setIsLoading(false);
   };
 
   const handleForgotPasswordSubmit = (e) => {
@@ -101,7 +125,7 @@ function Login() {
         <div className="auth-overlay">
           <div className="auth-card">
             <h1 className="auth-title">Reset Password</h1>
-            
+
             {resetSent ? (
               <div className="success-message">
                 If an account exists for {resetEmail}, a reset link has been sent.
@@ -113,19 +137,19 @@ function Login() {
                 <form onSubmit={handleForgotPasswordSubmit} className="auth-form">
                   <div className="input-group">
                     <label htmlFor="resetEmail">Email</label>
-                    <input 
-                      type="email" id="resetEmail" value={resetEmail} 
-                      onChange={(e) => setResetEmail(e.target.value)} 
-                      placeholder="barista@matcha.com" required 
+                    <input
+                      type="email" id="resetEmail" value={resetEmail}
+                      onChange={(e) => setResetEmail(e.target.value)}
+                      placeholder="barista@matcha.com" required
                     />
                   </div>
                   <button type="submit" className="auth-submit-btn">Send Link</button>
                 </form>
               </>
             )}
-            
+
             <div className="auth-toggle-section">
-              <button 
+              <button
                 type="button" className="forgot-password-btn"
                 onClick={() => {
                   setShowForgotPassword(false);
@@ -170,27 +194,27 @@ function Login() {
                 </div>
               </>
             )}
-            
+
             <div className="input-group">
               <label htmlFor="username">Username</label>
               <input type="text" id="username" name="username" value={formData.username} onChange={handleInputChange} placeholder="CoffeeLover99" required />
             </div>
-            
+
             <div className="input-group">
               <label htmlFor="password">Password</label>
               <input type="password" id="password" name="password" value={formData.password} onChange={handleInputChange} placeholder="••••••••" required />
             </div>
 
-            <button type="submit" className="auth-submit-btn">
-              {isRegister ? 'Brew My Account' : 'Login'}
+            <button type="submit" className="auth-submit-btn" disabled={isLoading}>
+              {isLoading ? 'Loading...' : (isRegister ? 'Brew My Account' : 'Login')}
             </button>
           </form>
 
           <div className="auth-toggle-section">
             <p>
               {isRegister ? 'Already have a mug?' : "Don't have an account?"}
-              <button 
-                type="button" 
+              <button
+                type="button"
                 className="auth-toggle-btn"
                 onClick={() => {
                   setIsRegister(!isRegister);
@@ -201,8 +225,8 @@ function Login() {
               </button>
             </p>
             {!isRegister && (
-              <button 
-                type="button" 
+              <button
+                type="button"
                 className="forgot-password-btn"
                 onClick={() => {
                   setShowForgotPassword(true);

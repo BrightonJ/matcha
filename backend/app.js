@@ -3,6 +3,7 @@ const morgan = require("morgan");
 const path = require("path");
 const http = require("http");
 const { initSocket } = require("./src/socket");
+const cors = require('cors');
 require("dotenv").config();
 
 // Importer les routes
@@ -22,6 +23,12 @@ const app = express();
 
 app.use(morgan("short"));
 app.use(express.json());
+
+// Configurer CORS pour autoriser les requêtes du frontend
+app.use(cors({
+  origin: process.env.FRONTEND_URL,
+  credentials: true
+}));
 
 // Servir les fichiers statiques (uploads)
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
