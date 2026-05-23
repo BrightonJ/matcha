@@ -101,6 +101,7 @@ const updateProfile = async (req, res) => {
       "gender",
       "sexualPreferences",
       "locationCity",
+      "birthDate",
     ];
     const updates = {};
 

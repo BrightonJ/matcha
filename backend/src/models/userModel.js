@@ -31,7 +31,7 @@ const userModel = {
   // Trouver un utilisateur par ID
   async findById(id) {
     const result = await pool.query(
-      'SELECT id, email, username, first_name, last_name, is_verified, created_at, bio, gender, sexual_preferences, popularity_score, last_seen FROM users WHERE id = $1',
+      'SELECT id, email, username, first_name, last_name, is_verified, created_at, bio, gender, sexual_preferences, popularity_score, last_seen, birth_date FROM users WHERE id = $1',
       [id]
     );
     return result.rows[0] || null;

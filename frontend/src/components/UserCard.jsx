@@ -1,30 +1,107 @@
 import { Link } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import API_URL from '../config/api';
 import '../assets/css/components.css';
+import { calculateAge } from '../utils/age';
 
-function UserCard({ user }) {
+function UserCard({ user, currentUserTags = [] }) {
+  const [isLiked, setIsLiked] = useState(false);
+  const [likeLoading, setLikeLoading] = useState(false);
+
+  // Vérifier si l'utilisateur a déjà liké ce profil
+  useEffect(() => {
+    const checkLikeStatus = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`${API_URL}/likes/check/${user.id}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          setIsLiked(data.liked);
+        }
+      } catch (err) {
+        console.error('Erreur vérification like:', err);
+      }
+    };
+    
+    if (user.id) {
+      checkLikeStatus();
+    }
+  }, [user.id]);
+
+  // Calculer le nombre de tags communs
+  const getCommonTagsCount = () => {
+    if (!user.tags || !currentUserTags.length) return 0;
+    return user.tags.filter(tag => currentUserTags.includes(tag)).length;
+  };
+
+  // Gérer le like
+  const handleLike = async (e) => {
+    e.preventDefault(); // Empêcher la navigation
+    if (likeLoading) return;
+    
+    setLikeLoading(true);
+    
+    try {
+      const token = localStorage.getItem('token');
+      const method = isLiked ? 'DELETE' : 'POST';
+      
+      const response = await fetch(`${API_URL}/likes/${user.id}`, {
+        method: method,
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (response.ok) {
+        setIsLiked(!isLiked);
+        const data = await response.json();
+        if (data.match) {
+          alert(`❤️ C'est un match avec ${user.first_name || user.username} ! Vous pouvez maintenant discuter.`);
+        }
+      }
+    } catch (err) {
+      console.error('Erreur like:', err);
+    } finally {
+      setLikeLoading(false);
+    }
+  };
+
+  const age = calculateAge(user.birth_date);
+  const location = user.location_city || user.location || 'Location inconnue';
+  const tags = user.tags || [];
+  const commonTagsCount = getCommonTagsCount();
+  const profilePhoto = user.profile_photo || user.profilePic || '/default-avatar.png';
+
   return (
-    <Link to={`/user/${user.id}`} className="user-card" style={{ display: 'block', textDecoration: 'none' }}>
+    <Link to={`/profile/${user.id}`} className="user-card" style={{ display: 'block', textDecoration: 'none' }}>
       <div className="user-card-image">
-        <img src={user.profilePic} alt={`${user.username} profile`} />
-        {user.isOnline && <span className="status-indicator online"></span>}
+        <img src={profilePhoto} alt={`${user.username} profile`} />
+        {user.is_online && <span className="status-indicator online"></span>}
       </div>
       <div className="user-card-info">
-        <h3>{user.username}, {user.age}</h3>
-        <p className="location">📍 {user.location}</p>
+        <h3>{user.first_name || user.username} {user.last_name || ''}, {age}</h3>
+        <p className="location">📍 {location}</p>
         <div className="tags-container">
-          {user.tags.map((tag, index) => (
+          {tags.slice(0, 3).map((tag, index) => (
             <span key={index} className="tag">{tag}</span>
           ))}
+          {tags.length > 3 && <span className="tag">+{tags.length - 3}</span>}
         </div>
         <div className="card-footer">
-          <span className="fame-rating">🔥 {user.fameRating} Fame</span>
+          <span className="fame-rating">🔥 {user.popularity_score || 0} Fame</span>
+          {commonTagsCount > 0 && (
+            <span className="common-tags">🎯 {commonTagsCount} tags</span>
+          )}
           <button 
-            className="like-btn" 
-            onClick={(e) => {
-              e.preventDefault();
-            }}
+            className={`like-btn ${isLiked ? 'liked' : ''}`} 
+            onClick={handleLike}
+            disabled={likeLoading}
           >
-            ❤️ Like
+            {isLiked ? '❤️ Liked' : '🤍 Like'}
           </button>
         </div>
       </div>

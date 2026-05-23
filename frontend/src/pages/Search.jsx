@@ -1,11 +1,14 @@
-import { useState, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import UserCard from '../components/UserCard';
-import mockUsers from '../mocks/users.json';
+import API_URL from '../config/api';
 import '../assets/css/search.css';
 
 function Search() {
   const { user } = useAuth();
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   const [ageMin, setAgeMin] = useState(18);
   const [ageMax, setAgeMax] = useState(100);
@@ -13,50 +16,138 @@ function Search() {
   const [locationFilter, setLocationFilter] = useState('');
   const [tagsFilter, setTagsFilter] = useState('');
   const [sortBy, setSortBy] = useState('match');
+  const [userTags, setUserTags] = useState([]);
 
-  const currentUserTags = ['#coffee', '#vegan'];
+  // Récupérer les suggestions du backend
+  useEffect(() => {
+    const fetchSuggestions = async () => {
+      try {
+        setLoading(true);
+        const token = localStorage.getItem('token');
+        
+        const response = await fetch(`${API_URL}/search/suggestions?limit=50`, {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+        
+        if (!response.ok) {
+          throw new Error('Erreur lors de la récupération des suggestions');
+        }
+        
+        const data = await response.json();
+        setUsers(data.suggestions || []);
+      } catch (err) {
+        console.error('Erreur:', err);
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    };
 
-  const getCommonTagsCount = (userTags) => {
-    return userTags.filter(tag => currentUserTags.includes(tag)).length;
+    // Récupérer les tags de l'utilisateur courant
+    const fetchUserTags = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`${API_URL}/tags/me`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (response.ok) {
+          const tags = await response.json();
+          setUserTags(tags.map(t => `#${t.name}`));
+        }
+      } catch (err) {
+        console.error('Erreur récupération tags:', err);
+      }
+    };
+
+    fetchSuggestions();
+    fetchUserTags();
+  }, []);
+
+  // Calculer le nombre de tags communs
+  const getCommonTagsCount = (userTagsList) => {
+    if (!userTagsList || !userTags) return 0;
+    return userTagsList.filter(tag => userTags.includes(tag)).length;
   };
 
+  // Filtrer et trier les utilisateurs
   const filteredAndSortedUsers = useMemo(() => {
-    let result = mockUsers.filter(u => {
-      const isAgeValid = u.age >= ageMin && u.age <= ageMax;
-      const isFameValid = u.fameRating >= minFame;
-      const isLocationValid = u.location.toLowerCase().includes(locationFilter.toLowerCase());
-      
-      let hasTags = true;
-      if (tagsFilter.trim() !== '') {
-        const searchTags = tagsFilter.toLowerCase().split(',').map(t => t.trim());
-        hasTags = searchTags.some(searchTag => 
+    let result = [...users];
+
+    // Filtre par âge (si birth_date existe)
+    if (ageMin || ageMax) {
+      result = result.filter(u => {
+        if (!u.birth_date) return true;
+        const userAge = new Date().getFullYear() - new Date(u.birth_date).getFullYear();
+        const isValidMin = !ageMin || userAge >= ageMin;
+        const isValidMax = !ageMax || userAge <= ageMax;
+        return isValidMin && isValidMax;
+      });
+    }
+
+    // Filtre par popularité
+    if (minFame > 0) {
+      result = result.filter(u => (u.popularity_score || 0) >= minFame);
+    }
+
+    // Filtre par localisation
+    if (locationFilter) {
+      result = result.filter(u => 
+        u.location_city?.toLowerCase().includes(locationFilter.toLowerCase())
+      );
+    }
+
+    // Filtre par tags
+    if (tagsFilter.trim()) {
+      const searchTags = tagsFilter.toLowerCase().split(',').map(t => t.trim());
+      result = result.filter(u => 
+        u.tags && searchTags.some(searchTag => 
           u.tags.some(userTag => userTag.toLowerCase().includes(searchTag))
-        );
-      }
+        )
+      );
+    }
 
-      return isAgeValid && isFameValid && isLocationValid && hasTags;
-    });
-
+    // Tri
     result.sort((a, b) => {
       switch (sortBy) {
         case 'age':
-          return a.age - b.age;
+          const ageA = a.birth_date ? new Date().getFullYear() - new Date(a.birth_date).getFullYear() : 0;
+          const ageB = b.birth_date ? new Date().getFullYear() - new Date(b.birth_date).getFullYear() : 0;
+          return ageA - ageB;
         case 'fame':
-          return b.fameRating - a.fameRating;
+          return (b.popularity_score || 0) - (a.popularity_score || 0);
         case 'location':
-          return a.location.localeCompare(b.location);
+          return (a.location_city || '').localeCompare(b.location_city || '');
         case 'tags':
           return getCommonTagsCount(b.tags) - getCommonTagsCount(a.tags);
         case 'match':
         default:
-          const scoreA = a.fameRating + (getCommonTagsCount(a.tags) * 10);
-          const scoreB = b.fameRating + (getCommonTagsCount(b.tags) * 10);
+          const scoreA = (a.popularity_score || 0) + (getCommonTagsCount(a.tags) * 10);
+          const scoreB = (b.popularity_score || 0) + (getCommonTagsCount(b.tags) * 10);
           return scoreB - scoreA;
       }
     });
 
     return result;
-  }, [ageMin, ageMax, minFame, locationFilter, tagsFilter, sortBy]);
+  }, [users, ageMin, ageMax, minFame, locationFilter, tagsFilter, sortBy, userTags]);
+
+  if (loading) {
+    return (
+      <div className="search-container">
+        <div className="loading-spinner">Loading coffee lovers...</div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="search-container">
+        <div className="error-message">Error: {error}</div>
+      </div>
+    );
+  }
 
   return (
     <div className="search-container">
@@ -84,7 +175,7 @@ function Search() {
         </div>
         
         <div className="filter-group">
-          <label>Min Fame Rating: {minFame}</label>
+          <label>Min Popularity: {minFame}</label>
           <input 
             type="range" 
             min="0" 
@@ -99,7 +190,7 @@ function Search() {
           <label>Location</label>
           <input 
             type="text" 
-            placeholder="City or Zip" 
+            placeholder="City" 
             value={locationFilter}
             onChange={(e) => setLocationFilter(e.target.value)}
           />
@@ -127,7 +218,7 @@ function Search() {
             <option value="match">Best Match</option>
             <option value="age">Age (Youngest)</option>
             <option value="location">Location (A-Z)</option>
-            <option value="fame">Fame Rating</option>
+            <option value="fame">Popularity</option>
             <option value="tags">Common Tags</option>
           </select>
         </div>
@@ -135,7 +226,7 @@ function Search() {
         <div className="users-grid">
           {filteredAndSortedUsers.length > 0 ? (
             filteredAndSortedUsers.map((u) => (
-              <UserCard key={u.id} user={u} />
+              <UserCard key={u.id} user={u} currentUserTags={userTags} />
             ))
           ) : (
             <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '3rem', color: '#666' }}>

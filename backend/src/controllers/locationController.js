@@ -1,22 +1,21 @@
-const { location: locationModel } = require('../models');
+const { location } = require('../models');
 
-// Obtenir ma localisation actuelle
+// Récupère la localisation de l'utilisateur connecté
 const getMyLocation = async (req, res) => {
   try {
-    const location = await locationModel.getUserLocation(req.userId);
-    res.json(location);
+    const userLocation = await location.getUserLocation(req.userId);
+    res.json(userLocation);
   } catch (error) {
     console.error('Erreur:', error);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 };
 
-// Mettre à jour la localisation GPS
+// Met à jour la localisation GPS de l'utilisateur
 const updateGpsLocation = async (req, res) => {
   try {
     const { latitude, longitude } = req.body;
     
-    // Validation
     if (latitude === undefined || longitude === undefined) {
       return res.status(400).json({ error: 'latitude et longitude sont requis' });
     }
@@ -33,7 +32,7 @@ const updateGpsLocation = async (req, res) => {
       return res.status(400).json({ error: 'longitude doit être comprise entre -180 et 180' });
     }
     
-    const updated = await locationModel.updateGpsLocation(req.userId, latitude, longitude);
+    const updated = await location.updateGps(req.userId, latitude, longitude);
     
     res.json({
       message: 'Localisation GPS mise à jour',
@@ -45,7 +44,7 @@ const updateGpsLocation = async (req, res) => {
   }
 };
 
-// Mettre à jour la localisation manuelle (ville/quartier)
+// Met à jour la localisation manuelle de l'utilisateur
 const updateManualLocation = async (req, res) => {
   try {
     const { city } = req.body;
@@ -54,7 +53,7 @@ const updateManualLocation = async (req, res) => {
       return res.status(400).json({ error: 'Une ville ou quartier valide est requis' });
     }
     
-    const updated = await locationModel.updateManualLocation(req.userId, city.trim());
+    const updated = await location.updateManual(req.userId, city.trim());
     
     res.json({
       message: 'Localisation manuelle mise à jour',
@@ -66,10 +65,10 @@ const updateManualLocation = async (req, res) => {
   }
 };
 
-// Désactiver la localisation
+// Désactive la localisation de l'utilisateur
 const disableLocation = async (req, res) => {
   try {
-    const updated = await locationModel.disableLocation(req.userId);
+    const updated = await location.disable(req.userId);
     
     res.json({
       message: 'Localisation désactivée',

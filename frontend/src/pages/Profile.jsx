@@ -1,68 +1,522 @@
-import { useState } from 'react';
-import { useAuth } from '../context/AuthContext';
-import mockUsers from '../mocks/users.json';
-import '../assets/css/profile.css';
+import { useState, useEffect } from "react";
+import { useAuth } from "../context/AuthContext";
+import { useNavigate } from "react-router-dom";
+import API_URL from "../config/api";
+import { calculateAge } from '../utils/age';
+import "../assets/css/profile.css";
 
 function Profile() {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState('edit');
-  
-  const [profileData, setProfileData] = useState({ gender: '', preference: 'bisexual', bio: '', location: '' });
+  const navigate = useNavigate();
+  const [activeTab, setActiveTab] = useState("edit");
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState({ type: "", text: "" });
+
+  const [profileData, setProfileData] = useState({
+    gender: "",
+    sexualPreferences: "bisexual",
+    bio: "",
+    locationCity: "",
+    firstName: "",
+    lastName: "",
+    email: "",
+    birthDate: "",
+  });
+
   const [tags, setTags] = useState([]);
-  const [tagInput, setTagInput] = useState('');
+  const [availableTags, setAvailableTags] = useState([]);
+  const [selectedTag, setSelectedTag] = useState("");
   const [photos, setPhotos] = useState([]);
-  const [mainPhotoIndex, setMainPhotoIndex] = useState(0);
-  const [gpsStatus, setGpsStatus] = useState({ type: '', message: '' });
+  const [mainPhotoId, setMainPhotoId] = useState(null);
+  const [viewers, setViewers] = useState([]);
+  const [likers, setLikers] = useState([]);
+  const [showPreview, setShowPreview] = useState(false);
 
-  const mockViewers = [mockUsers[0], mockUsers[1]];
-  const mockLikers = [mockUsers[1]];
+  // Charger tous les tags disponibles depuis le backend
+  const fetchAvailableTags = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(`${API_URL}/tags`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
 
-  const handleInputChange = (e) => setProfileData(prev => ({ ...prev, [e.target.name]: e.target.value }));
-
-  const handleTagKeyDown = (e) => {
-    if (e.key === 'Enter' || e.key === ' ' || e.key === ',') {
-      e.preventDefault();
-      let newTag = tagInput.trim().toLowerCase();
-      if (newTag && !newTag.startsWith('#')) newTag = '#' + newTag;
-      if (newTag.length > 1 && !tags.includes(newTag)) setTags([...tags, newTag]);
-      setTagInput('');
+      if (response.ok) {
+        const data = await response.json();
+        setAvailableTags(data);
+      }
+    } catch (err) {
+      console.error("Erreur chargement tags disponibles:", err);
     }
   };
 
-  const removeTag = (indexToRemove) => setTags(tags.filter((_, index) => index !== indexToRemove));
+  // Charger le profil utilisateur
+  const fetchProfile = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(`${API_URL}/profile/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setProfileData({
+          gender: data.gender || "",
+          sexualPreferences: data.sexual_preferences || "bisexual",
+          bio: data.bio || "",
+          locationCity: data.location_city || "",
+          firstName: data.first_name || "",
+          lastName: data.last_name || "",
+          email: data.email || "",
+          birthDate: data.birth_date ? data.birth_date.split('T')[0] : "",
+        });
+      }
+    } catch (err) {
+      console.error("Erreur chargement profil:", err);
+    }
+  };
+
+  // Charger les tags de l'utilisateur
+  const fetchUserTags = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(`${API_URL}/tags/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setTags(data.map((t) => `#${t.name}`));
+      }
+    } catch (err) {
+      console.error("Erreur chargement tags:", err);
+    }
+  };
+
+  // Charger les photos
+  const fetchUserPhotos = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(`${API_URL}/photos/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setPhotos(data);
+        const profilePhoto = data.find((p) => p.is_profile);
+        if (profilePhoto) setMainPhotoId(profilePhoto.id);
+      }
+    } catch (err) {
+      console.error("Erreur chargement photos:", err);
+    }
+  };
+
+  // Charger les visiteurs
+  const fetchVisitors = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(`${API_URL}/profile/visitors`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setViewers(data);
+      }
+    } catch (err) {
+      console.error("Erreur chargement visiteurs:", err);
+    }
+  };
+
+  // Charger les likers
+  const fetchLikers = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(`${API_URL}/likes/received`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setLikers(data);
+      }
+    } catch (err) {
+      console.error("Erreur chargement likers:", err);
+    }
+  };
+
+  useEffect(() => {
+    fetchProfile();
+    fetchUserTags();
+    fetchAvailableTags();
+    fetchUserPhotos();
+    fetchVisitors();
+    fetchLikers();
+  }, []);
+
+  const handleInputChange = (e) => {
+    setProfileData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
+  };
+
+  // Ajouter un tag depuis le menu déroulant
+  const addTagFromSelect = async () => {
+    if (!selectedTag) return;
+
+    const tagName = selectedTag;
+    if (tags.includes(`#${tagName}`)) {
+      setMessage({ type: "error", text: "Tag déjà ajouté" });
+      setTimeout(() => setMessage({ type: "", text: "" }), 3000);
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(`${API_URL}/tags/me`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ tagName }),
+      });
+
+      if (response.ok) {
+        setTags([...tags, `#${tagName}`]);
+        setSelectedTag("");
+        setMessage({ type: "success", text: "Tag ajouté" });
+      } else {
+        const error = await response.json();
+        setMessage({ type: "error", text: error.error || "Erreur" });
+      }
+    } catch (err) {
+      console.error("Erreur ajout tag:", err);
+    }
+    setTimeout(() => setMessage({ type: "", text: "" }), 3000);
+  };
+
+  const removeTag = async (indexToRemove) => {
+    const tagToRemove = tags[indexToRemove].substring(1);
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(`${API_URL}/tags/me/${tagToRemove}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (response.ok) {
+        setTags(tags.filter((_, index) => index !== indexToRemove));
+        setMessage({ type: "success", text: "Tag supprimé" });
+      }
+    } catch (err) {
+      console.error("Erreur suppression tag:", err);
+    }
+    setTimeout(() => setMessage({ type: "", text: "" }), 3000);
+  };
+
+  const handlePhotoUpload = async (e) => {
+    const files = Array.from(e.target.files);
+    if (photos.length + files.length > 5) {
+      setMessage({ type: "error", text: "Maximum 5 photos" });
+      setTimeout(() => setMessage({ type: "", text: "" }), 3000);
+      return;
+    }
+
+    setLoading(true);
+
+    for (const file of files) {
+      const formData = new FormData();
+      formData.append("photo", file);
+
+      try {
+        const token = localStorage.getItem("token");
+        const response = await fetch(`${API_URL}/photos/upload`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+          body: formData,
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          setPhotos((prev) => [...prev, data.photo]);
+          if (data.photo.is_profile) setMainPhotoId(data.photo.id);
+          setMessage({ type: "success", text: "Photo ajoutée" });
+        } else {
+          const error = await response.json();
+          setMessage({ type: "error", text: error.error });
+        }
+      } catch (err) {
+        console.error("Erreur upload:", err);
+      }
+    }
+
+    setLoading(false);
+    setTimeout(() => setMessage({ type: "", text: "" }), 3000);
+  };
+
+  const setMainPhoto = async (photoId) => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(`${API_URL}/photos/profile/${photoId}`, {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (response.ok) {
+        setMainPhotoId(photoId);
+        setPhotos(photos.map((p) => ({ ...p, is_profile: p.id === photoId })));
+        setMessage({ type: "success", text: "Photo de profil mise à jour" });
+      }
+    } catch (err) {
+      console.error("Erreur mise à jour photo de profil:", err);
+    }
+    setTimeout(() => setMessage({ type: "", text: "" }), 3000);
+  };
+
+  const removePhoto = async (photoId, index) => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(`${API_URL}/photos/${photoId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (response.ok) {
+        setPhotos(photos.filter((_, i) => i !== index));
+        if (mainPhotoId === photoId) setMainPhotoId(null);
+        setMessage({ type: "success", text: "Photo supprimée" });
+      }
+    } catch (err) {
+      console.error("Erreur suppression photo:", err);
+    }
+    setTimeout(() => setMessage({ type: "", text: "" }), 3000);
+  };
 
   const handleGetLocation = () => {
-    setGpsStatus({ type: 'loading', message: 'Locating...' });
     if ("geolocation" in navigator) {
+      setLoading(true);
+      setMessage({
+        type: "info",
+        text: "📍 Récupération de votre position...",
+      });
+
       navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          setGpsStatus({ type: 'success', message: 'GPS Location acquired!' });
-          setProfileData(prev => ({ ...prev, location: `Lat: ${pos.coords.latitude.toFixed(4)}, Lon: ${pos.coords.longitude.toFixed(4)}` }));
+        async (pos) => {
+          try {
+            const { latitude, longitude } = pos.coords;
+
+            // 1. Envoyer les coordonnées GPS au backend
+            const token = localStorage.getItem("token");
+            const gpsResponse = await fetch(`${API_URL}/location/gps`, {
+              method: "PUT",
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ latitude, longitude }),
+            });
+
+            if (!gpsResponse.ok) {
+              throw new Error("Erreur lors de l'envoi des coordonnées");
+            }
+
+            // 2. Convertir les coordonnées en nom de ville (geocoding inverse)
+            const geoResponse = await fetch(
+              `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=10&addressdetails=1`,
+            );
+
+            if (geoResponse.ok) {
+              const geoData = await geoResponse.json();
+
+              // Extraire la ville
+              let city = "";
+              if (geoData.address) {
+                city =
+                  geoData.address.city ||
+                  geoData.address.town ||
+                  geoData.address.village ||
+                  geoData.address.suburb ||
+                  geoData.address.county ||
+                  "Position inconnue";
+              } else {
+                city = `Lat: ${latitude.toFixed(4)}, Lon: ${longitude.toFixed(4)}`;
+              }
+
+              // 3. Mettre à jour le champ manuel avec la ville trouvée
+              setProfileData((prev) => ({ ...prev, locationCity: city }));
+
+              // Optionnel : sauvegarder automatiquement la ville
+              const updateResponse = await fetch(`${API_URL}/profile/me`, {
+                method: "PUT",
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  ...profileData,
+                  locationCity: city,
+                }),
+              });
+
+              if (updateResponse.ok) {
+                setMessage({
+                  type: "success",
+                  text: `📍 Localisation mise à jour : ${city}`,
+                });
+              } else {
+                setMessage({
+                  type: "success",
+                  text: `📍 Position GPS enregistrée : ${city}`,
+                });
+              }
+            } else {
+              setMessage({
+                type: "success",
+                text: "📍 Position GPS enregistrée !",
+              });
+            }
+          } catch (err) {
+            console.error("Erreur:", err);
+            setMessage({
+              type: "error",
+              text: "❌ Erreur lors de la géolocalisation",
+            });
+          } finally {
+            setLoading(false);
+            setTimeout(() => setMessage({ type: "", text: "" }), 4000);
+          }
         },
-        () => {
-          setGpsStatus({ type: 'error', message: 'GPS access denied.' });
-        }
+        (error) => {
+          console.error("Erreur GPS:", error);
+          let errorMsg = "❌ Impossible d'accéder à votre position.";
+          if (error.code === 1)
+            errorMsg = "❌ Vous avez refusé l'accès à la géolocalisation.";
+          if (error.code === 2) errorMsg = "❌ Position indisponible.";
+          if (error.code === 3) errorMsg = "❌ Délai d'attente dépassé.";
+          setMessage({ type: "error", text: errorMsg });
+          setLoading(false);
+          setTimeout(() => setMessage({ type: "", text: "" }), 4000);
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 0,
+        },
       );
     } else {
-      setGpsStatus({ type: 'error', message: 'Geolocation is not supported.' });
+      setMessage({
+        type: "error",
+        text: "❌ La géolocalisation n'est pas supportée par votre navigateur.",
+      });
+      setTimeout(() => setMessage({ type: "", text: "" }), 4000);
     }
   };
 
-  const handlePhotoUpload = (e) => {
-    const files = Array.from(e.target.files);
-    if (photos.length + files.length > 5) return alert("Maximum 5 photos.");
-    setPhotos(prev => [...prev, ...files.map(f => URL.createObjectURL(f))]);
-  };
-
-  const removePhoto = (index) => {
-    setPhotos(photos.filter((_, i) => i !== index));
-    if (mainPhotoIndex === index) setMainPhotoIndex(0);
-    else if (mainPhotoIndex > index) setMainPhotoIndex(prev => prev - 1);
-  };
-
-  const handleSaveProfile = (e) => {
+  const handleSaveProfile = async (e) => {
     e.preventDefault();
-    if (!profileData.location) return alert("Location is required.");
+    setLoading(true);
+
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(`${API_URL}/profile/me`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          firstName: profileData.firstName,
+          lastName: profileData.lastName,
+          email: profileData.email,
+          bio: profileData.bio,
+          gender: profileData.gender,
+          sexualPreferences: profileData.sexualPreferences,
+          locationCity: profileData.locationCity,
+          birthDate: profileData.birthDate,
+        }),
+      });
+
+      if (response.ok) {
+        setMessage({ type: "success", text: "Profile saved!" });
+      } else {
+        const error = await response.json();
+        setMessage({
+          type: "error",
+          text: error.error || "Error saving profile",
+        });
+      }
+    } catch (err) {
+      console.error("Erreur sauvegarde:", err);
+    }
+
+    setLoading(false);
+    setTimeout(() => setMessage({ type: "", text: "" }), 3000);
+  };
+
+  const formatDate = (dateStr) => {
+    if (!dateStr) return "Unknown";
+    const date = new Date(dateStr);
+    return date.toLocaleDateString();
+  };
+
+  // Aperçu du profil public
+  const PreviewProfile = ({ onClose }) => {
+    const profilePhoto = photos.find((p) => p.is_profile);
+    const age = calculateAge(profileData.birthDate);
+
+    // Fermer si on clique sur l'overlay (fond noir)
+    const handleOverlayClick = (e) => {
+      if (e.target === e.currentTarget) {
+        onClose();
+      }
+    };
+
+    const displayName = profileData.firstName || user?.username || "You";
+
+    return (
+      <div className="preview-overlay" onClick={handleOverlayClick}>
+        <div className="preview-container">
+          <div className="preview-header">
+            <h3>{displayName}</h3>
+            <button className="close-preview" onClick={onClose}>
+              ×
+            </button>
+          </div>
+          <div className="preview-content">
+            <div className="preview-photo">
+              <img
+                src={
+                  profilePhoto
+                    ? `${API_URL.replace("/api", "")}${profilePhoto.url}`
+                    : "/default-avatar.png"
+                }
+                alt="Profile"
+              />
+            </div>
+            <div className="preview-info">
+              <h2>
+                {profileData.firstName} {profileData.lastName}, {age}
+              </h2>
+              <p className="preview-username">@{user?.username}</p>
+              {profileData.locationCity && (
+                <p className="preview-location">
+                  📍 {profileData.locationCity}
+                </p>
+              )}
+              {profileData.bio && (
+                <p className="preview-bio">{profileData.bio}</p>
+              )}
+              <div className="preview-tags">
+                {tags.map((tag, i) => (
+                  <span key={i} className="tag">
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -70,35 +524,103 @@ function Profile() {
       <div className="profile-header">
         <h2>Your Mug (Profile)</h2>
         <p>Manage your account and see your activity, {user?.username}!</p>
+        <button className="preview-btn" onClick={() => setShowPreview(true)}>
+          See my profile
+        </button>
       </div>
+
+      {showPreview && <PreviewProfile onClose={() => setShowPreview(false)} />}
+
+      {message.text && (
+        <div className={`message-banner ${message.type}`}>{message.text}</div>
+      )}
 
       <div className="profile-tabs">
-        <button className={`tab-btn ${activeTab === 'edit' ? 'active' : ''}`} onClick={() => setActiveTab('edit')}>Edit Profile</button>
-        <button className={`tab-btn ${activeTab === 'viewers' ? 'active' : ''}`} onClick={() => setActiveTab('viewers')}>Who Viewed Me?</button>
-        <button className={`tab-btn ${activeTab === 'likers' ? 'active' : ''}`} onClick={() => setActiveTab('likers')}>Who Liked Me?</button>
+        <button
+          className={`tab-btn ${activeTab === "edit" ? "active" : ""}`}
+          onClick={() => setActiveTab("edit")}
+        >
+          Edit Profile
+        </button>
+        <button
+          className={`tab-btn ${activeTab === "viewers" ? "active" : ""}`}
+          onClick={() => setActiveTab("viewers")}
+        >
+          Who Viewed Me?
+        </button>
+        <button
+          className={`tab-btn ${activeTab === "likers" ? "active" : ""}`}
+          onClick={() => setActiveTab("likers")}
+        >
+          Who Liked Me?
+        </button>
       </div>
 
-      {activeTab === 'edit' && (
+      {activeTab === "edit" && (
         <form onSubmit={handleSaveProfile}>
           <div className="profile-section">
             <h3>Basic Info</h3>
             <div className="form-grid">
               <div className="form-group">
+                <label>First Name</label>
+                <input
+                  type="text"
+                  name="firstName"
+                  value={profileData.firstName}
+                  onChange={handleInputChange}
+                />
+              </div>
+              <div className="form-group">
+                <label>Last Name</label>
+                <input
+                  type="text"
+                  name="lastName"
+                  value={profileData.lastName}
+                  onChange={handleInputChange}
+                />
+              </div>
+              <div className="form-group">
+                <label>Email</label>
+                <input
+                  type="email"
+                  name="email"
+                  value={profileData.email}
+                  onChange={handleInputChange}
+                />
+              </div>
+              <div className="form-group">
                 <label>Gender</label>
-                <select name="gender" value={profileData.gender} onChange={handleInputChange} required>
-                  <option value="" disabled>Select...</option>
+                <select
+                  name="gender"
+                  value={profileData.gender}
+                  onChange={handleInputChange}
+                >
+                  <option value="">Select...</option>
                   <option value="male">Male</option>
                   <option value="female">Female</option>
-                  <option value="non-binary">Non-binary</option>
+                  <option value="other">Other</option>
                 </select>
               </div>
               <div className="form-group">
                 <label>Looking for</label>
-                <select name="preference" value={profileData.preference} onChange={handleInputChange}>
+                <select
+                  name="sexualPreferences"
+                  value={profileData.sexualPreferences}
+                  onChange={handleInputChange}
+                >
                   <option value="bisexual">Everyone</option>
                   <option value="male">Men</option>
                   <option value="female">Women</option>
                 </select>
+              </div>
+              <div className="form-group">
+                <label>Birth Date</label>
+                <input
+                  type="date"
+                  name="birthDate"
+                  value={profileData.birthDate}
+                  onChange={handleInputChange}
+                />
               </div>
             </div>
           </div>
@@ -106,11 +628,25 @@ function Profile() {
           <div className="profile-section">
             <h3>Location</h3>
             <div className="location-container">
-              <button type="button" className="gps-btn" onClick={handleGetLocation}>📍 Locate me via GPS</button>
-              {gpsStatus.message && <span className={`gps-status ${gpsStatus.type}`}>{gpsStatus.message}</span>}
+              <button
+                type="button"
+                className="gps-btn"
+                onClick={handleGetLocation}
+                disabled={loading}
+              >
+                {loading
+                  ? "⏳ Localisation en cours..."
+                  : "📍 Locate me via GPS"}
+              </button>
               <div className="form-group">
-                <label>Manual Location</label>
-                <input type="text" name="location" value={profileData.location} onChange={handleInputChange} required />
+                <label>Manual Location (City)</label>
+                <input
+                  type="text"
+                  name="locationCity"
+                  value={profileData.locationCity}
+                  onChange={handleInputChange}
+                  placeholder="Paris, Lyon, etc."
+                />
               </div>
             </div>
           </div>
@@ -118,7 +654,13 @@ function Profile() {
           <div className="profile-section">
             <h3>Biography</h3>
             <div className="form-group">
-              <textarea name="bio" value={profileData.bio} onChange={handleInputChange} required />
+              <textarea
+                name="bio"
+                value={profileData.bio}
+                onChange={handleInputChange}
+                rows="4"
+                placeholder="Tell us about yourself..."
+              />
             </div>
           </div>
 
@@ -129,10 +671,37 @@ function Profile() {
                 {tags.map((tag, idx) => (
                   <div key={idx} className="tag-pill">
                     {tag}
-                    <button type="button" className="tag-remove" onClick={() => removeTag(idx)}>&times;</button>
+                    <button
+                      type="button"
+                      className="tag-remove"
+                      onClick={() => removeTag(idx)}
+                    >
+                      &times;
+                    </button>
                   </div>
                 ))}
-                <input type="text" className="tag-input" value={tagInput} onChange={(e) => setTagInput(e.target.value)} onKeyDown={handleTagKeyDown} />
+              </div>
+              <div className="add-tag-select">
+                <select
+                  value={selectedTag}
+                  onChange={(e) => setSelectedTag(e.target.value)}
+                >
+                  <option value="">-- Select a tag to add --</option>
+                  {availableTags
+                    .filter((t) => !tags.includes(`#${t.name}`))
+                    .map((tag) => (
+                      <option key={tag.id} value={tag.name}>
+                        #{tag.name}
+                      </option>
+                    ))}
+                </select>
+                <button
+                  type="button"
+                  className="add-tag-btn"
+                  onClick={addTagFromSelect}
+                >
+                  + Add Tag
+                </button>
               </div>
             </div>
           </div>
@@ -142,53 +711,106 @@ function Profile() {
             <div className="form-group">
               {photos.length < 5 && (
                 <div className="upload-btn-wrapper">
-                  <button type="button" className="upload-btn">➕ Add Photo</button>
-                  <input type="file" accept="image/*" multiple onChange={handlePhotoUpload} />
+                  <button type="button" className="upload-btn">
+                    ➕ Add Photo
+                  </button>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={handlePhotoUpload}
+                    disabled={loading}
+                  />
                 </div>
               )}
               <div className="photos-grid">
-                {photos.map((url, idx) => (
-                  <div key={idx} className={`photo-preview-card ${mainPhotoIndex === idx ? 'is-main' : ''}`}>
-                    {mainPhotoIndex === idx && <span className="main-badge">Main</span>}
-                    <img src={url} alt="" />
+                {photos.map((photo, idx) => (
+                  <div
+                    key={photo.id}
+                    className={`photo-preview-card ${photo.is_profile ? "is-main" : ""}`}
+                  >
+                    {photo.is_profile && (
+                      <span className="main-badge">Main</span>
+                    )}
+                    <img
+                      src={`${API_URL.replace("/api", "")}${photo.url}`}
+                      alt="Preview"
+                    />
                     <div className="photo-actions">
-                      {mainPhotoIndex !== idx && <button type="button" className="photo-action-btn" onClick={() => setMainPhotoIndex(idx)}>Main</button>}
-                      <button type="button" className="photo-action-btn delete" onClick={() => removePhoto(idx)}>Delete</button>
+                      {!photo.is_profile && (
+                        <button
+                          type="button"
+                          className="photo-action-btn"
+                          onClick={() => setMainPhoto(photo.id)}
+                        >
+                          Main
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="photo-action-btn delete"
+                        onClick={() => removePhoto(photo.id, idx)}
+                      >
+                        Delete
+                      </button>
                     </div>
                   </div>
                 ))}
               </div>
             </div>
           </div>
-          <button type="submit" className="save-btn">Save Profile</button>
+
+          <button type="submit" className="save-btn" disabled={loading}>
+            {loading ? "Saving..." : "Save Profile"}
+          </button>
         </form>
       )}
 
-      {activeTab === 'viewers' && (
+      {activeTab === "viewers" && (
         <div className="history-list">
-          {mockViewers.map(u => (
-            <div key={u.id} className="history-item">
-              <img src={u.profilePic} alt={u.username} />
-              <div className="history-info">
-                <h4>{u.username}</h4>
-                <p>Viewed your profile 2 hours ago</p>
+          {viewers.length > 0 ? (
+            viewers.map((v) => (
+              <div key={v.visitor_id} className="history-item">
+                <img
+                  src={v.profile_photo || "/default-avatar.png"}
+                  alt={v.username}
+                />
+                <div className="history-info">
+                  <h4>
+                    {v.first_name} {v.last_name} (@{v.username})
+                  </h4>
+                  <p>Viewed your profile on {formatDate(v.viewed_at)}</p>
+                </div>
               </div>
-            </div>
-          ))}
+            ))
+          ) : (
+            <p className="empty-message">
+              No one has visited your profile yet.
+            </p>
+          )}
         </div>
       )}
 
-      {activeTab === 'likers' && (
+      {activeTab === "likers" && (
         <div className="history-list">
-          {mockLikers.map(u => (
-            <div key={u.id} className="history-item">
-              <img src={u.profilePic} alt={u.username} />
-              <div className="history-info">
-                <h4>{u.username}</h4>
-                <p>Liked you yesterday</p>
+          {likers.length > 0 ? (
+            likers.map((l) => (
+              <div key={l.id} className="history-item">
+                <img
+                  src={l.profile_photo || "/default-avatar.png"}
+                  alt={l.username}
+                />
+                <div className="history-info">
+                  <h4>
+                    {l.first_name} {l.last_name} (@{l.username})
+                  </h4>
+                  <p>Liked you on {formatDate(l.created_at)}</p>
+                </div>
               </div>
-            </div>
-          ))}
+            ))
+          ) : (
+            <p className="empty-message">No one has liked you yet.</p>
+          )}
         </div>
       )}
     </div>
