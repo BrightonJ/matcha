@@ -81,6 +81,7 @@ const searchModel = {
              u.birth_date,
              (SELECT COUNT(*) FROM photos WHERE user_id = u.id) as photo_count,
              (SELECT url FROM photos WHERE user_id = u.id AND is_profile = true) as profile_photo,
+             (SELECT is_external FROM photos WHERE user_id = u.id AND is_profile = true) as photo_is_external,
              COALESCE(
                (SELECT json_agg(t.name) 
                 FROM user_tags ut 
@@ -174,6 +175,7 @@ const searchModel = {
            u.location_city, u.location_manual, u.birth_date,
            u.is_online,
            (SELECT url FROM photos WHERE user_id = u.id AND is_profile = true) as profile_photo,
+           (SELECT is_external FROM photos WHERE user_id = u.id AND is_profile = true) as photo_is_external,
            COALESCE(
              (SELECT json_agg(t.name) 
               FROM user_tags ut 

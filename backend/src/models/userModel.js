@@ -33,7 +33,9 @@ const userModel = {
     const result = await pool.query(
       `SELECT id, email, username, first_name, last_name, is_verified, created_at, 
             bio, gender, sexual_preferences, popularity_score, last_seen, birth_date,
-            location_city, latitude, longitude, location_manual, is_online
+            location_city, latitude, longitude, location_manual, is_online,
+            (SELECT url FROM photos WHERE user_id = users.id AND is_profile = true) as profile_photo,
+            (SELECT is_external FROM photos WHERE user_id = users.id AND is_profile = true) as photo_is_external
      FROM users WHERE id = $1`,
       [id],
     );
@@ -42,7 +44,6 @@ const userModel = {
 
     const user = result.rows[0];
 
-    // Récupérer les tags de l'utilisateur
     const tagsResult = await pool.query(
       `SELECT t.name 
      FROM tags t

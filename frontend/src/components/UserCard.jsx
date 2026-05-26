@@ -8,7 +8,12 @@ function UserCard({ user, currentUserTags = [] }) {
   const [isLiked, setIsLiked] = useState(false);
   const [likeLoading, setLikeLoading] = useState(false);
 
-  // Vérifier si l'utilisateur a déjà liké ce profil
+  const getPhotoUrl = (photoUrl, isExternal) => {
+    if (!photoUrl) return '/default-avatar.png';
+    if (isExternal) return photoUrl;
+    return `${API_URL.replace('/api', '')}${photoUrl}`;
+  };
+
   useEffect(() => {
     const checkLikeStatus = async () => {
       try {
@@ -34,9 +39,7 @@ function UserCard({ user, currentUserTags = [] }) {
   const age = calculateAge(user.birth_date);
   const location = user.location_city || user.location || 'Location inconnue';
   const tags = user.tags || [];
-  const profilePhoto = user.profile_photo 
-    ? `${API_URL.replace('/api', '')}${user.profile_photo}` 
-    : '/default-avatar.png';
+  const profilePhoto = getPhotoUrl(user.profile_photo, user.photo_is_external);
 
   const handleLike = async (e) => {
     e.preventDefault();

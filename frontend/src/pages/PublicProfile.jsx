@@ -18,6 +18,12 @@ function PublicProfile() {
 
   const token = localStorage.getItem('token');
 
+  const getPhotoUrl = (photo, isExternal) => {
+    if (!photo) return '/default-avatar.png';
+    if (isExternal) return photo;
+    return `${API_URL.replace('/api', '')}${photo}`;
+  };
+
   // Récupérer mes tags
   const fetchMyTags = async () => {
     try {
@@ -49,7 +55,6 @@ function PublicProfile() {
         const data = await response.json();
         setUser(data);
         
-        // Calculer les tags communs si mes tags sont chargés
         if (data.tags && myTags.length > 0) {
           const common = data.tags.filter(tag => myTags.includes(tag));
           setCommonTags(common);
@@ -131,12 +136,10 @@ function PublicProfile() {
     }
   };
 
-  // Charger mes tags d'abord
   useEffect(() => {
     fetchMyTags();
   }, []);
 
-  // Une fois mes tags chargés, charger le profil
   useEffect(() => {
     if (id && token) {
       fetchUserProfile();
@@ -146,7 +149,6 @@ function PublicProfile() {
     }
   }, [id, token]);
 
-  // Une fois le profil chargé, charger les photos
   useEffect(() => {
     if (user) {
       fetchUserPhotos();
@@ -154,7 +156,6 @@ function PublicProfile() {
     }
   }, [user]);
 
-  // Mettre à jour les tags communs quand les tags de l'utilisateur ou mes tags changent
   useEffect(() => {
     if (user?.tags && myTags.length > 0) {
       const common = user.tags.filter(tag => myTags.includes(tag));
@@ -248,7 +249,6 @@ function PublicProfile() {
   const age = calculateAge(user.birth_date);
   const profilePhoto = photos.find(p => p.is_profile);
   const otherPhotos = photos.filter(p => !p.is_profile);
-  const hasProfilePhoto = profilePhoto ? `${API_URL.replace('/api', '')}${profilePhoto.url}` : null;
 
   return (
     <div className="public-profile-container">
@@ -295,8 +295,8 @@ function PublicProfile() {
       </div>
 
       <div className="public-photos">
-        {hasProfilePhoto ? (
-          <img src={hasProfilePhoto} alt="Photo de profil" />
+        {profilePhoto ? (
+          <img src={getPhotoUrl(profilePhoto.url, profilePhoto.is_external)} alt="Photo de profil" />
         ) : (
           <div className="no-photo">Aucune photo de profil</div>
         )}
@@ -309,7 +309,7 @@ function PublicProfile() {
             {otherPhotos.map(photo => (
               <img 
                 key={photo.id} 
-                src={`${API_URL.replace('/api', '')}${photo.url}`} 
+                src={getPhotoUrl(photo.url, photo.is_external)} 
                 alt="Photo"
               />
             ))}
@@ -326,6 +326,8 @@ function PublicProfile() {
         ) : (
           <p>Non renseignée</p>
         )}
+        {user.location_manual && <small>(Localisation manuelle)</small>}
+        {!user.location_manual && (user.latitude || user.longitude) && <small>(GPS)</small>}
       </div>
 
       <div className="info-block">
