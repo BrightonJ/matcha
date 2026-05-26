@@ -36,7 +36,8 @@
 }
 
 .status-indicator.online {
-  background-color: var(--color-success);
+  background-color: #4caf50;
+  box-shadow: 0 0 5px rgba(76, 175, 80, 0.5);
 }
 
 .user-card-info {
@@ -104,6 +105,7 @@
 .like-btn.liked {
   background-color: #e91e63;
   color: white;
+  border-color: #e91e63;
 }
 
 .like-btn:disabled {
@@ -163,17 +165,55 @@
   height: 120px;
 }
 
-.status-indicator {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  width: 15px;
-  height: 15px;
-  border-radius: 50%;
-  border: 2px solid white;
+/* Responsive */
+@media (max-width: 768px) {
+  .user-card-info h3 {
+    font-size: 1.2rem;
+  }
+  
+  .tag {
+    font-size: 0.7rem;
+  }
+  
+  .like-btn {
+    padding: 0.3rem 0.8rem;
+    font-size: 0.8rem;
+  }
 }
 
-.status-indicator.online {
-  background-color: #4caf50;
-  box-shadow: 0 0 5px rgba(76, 175, 80, 0.5);
+@media (max-width: 480px) {
+  .user-card-image {
+    height: 180px;
+  }
+  
+  .user-card-info {
+    padding: 0.8rem;
+  }
+  
+  .user-card-info h3 {
+    font-size: 1rem;
+  }
+  
+  .location {
+    font-size: 0.75rem;
+  }
+  
+  .tag {
+    font-size: 0.65rem;
+    padding: 0.2rem 0.5rem;
+  }
+  
+  .fame-rating {
+    font-size: 0.75rem;
+  }
+  
+  .like-btn {
+    padding: 0.2rem 0.6rem;
+    font-size: 0.7rem;
+  }
+  
+  .avatar-sm {
+    width: 28px;
+    height: 28px;
+  }
 }

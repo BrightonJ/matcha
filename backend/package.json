@@ -5,7 +5,8 @@
   "scripts": {
     "start": "node app.js",
     "dev": "nodemon app.js",
-    "init-db": "node src/db/initDb.js && node src/db/seed.js",
+    "init-db": "node src/db/initDb.js",
+    "seed": "node src/db/seed.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "",

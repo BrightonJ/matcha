@@ -22,14 +22,14 @@ function MainLayout() {
         <div className="nav-brand">
           <Link to="/search">Matcha Cafe</Link>
         </div>
-        <nav className="nav-links">
+        <div className="nav-links">
           <Link to="/search">Search</Link>
           <Link to="/profile">Profile</Link>
           <Link to="/chat">Chat</Link>
           <NotificationBell />
           {user && <Avatar user={user} size="sm" onClick={() => navigate('/profile')} />}
           <button onClick={handleLogout} className="logout-btn">Logout</button>
-        </nav>
+        </div>
       </header>
       
       <main className="main-content">
