@@ -56,7 +56,7 @@ EMAIL_USER=votre.email@gmail.com
 EMAIL_PASSWORD=mot_de_passe_application
 
 # Frontend
-FRONTEND_URL=http://localhost:3001
+FRONTEND_URL=http://localhost:5173
 ```
 
 ### 4. Initialiser la base de données
@@ -170,6 +170,7 @@ backend/
 | GET | /api/notifications/unread/count | Compteur non lues |
 | PUT | /api/notifications/:id/read | Marquer comme lue |
 | PUT | /api/notifications/read-all | Tout marquer |
+| DELETE | /api/notifications/:id | Supprimer une notification |
 
 ### Blocage
 
@@ -198,6 +199,7 @@ const socket = io('http://localhost:3000', {
 | new_message | Réception | Recevoir un message |
 | notification | Réception | Recevoir une notification |
 | mark_read | Émission | Marquer comme lu |
+| user_status | Émission | Mise à jour du statut en ligne |
 
 ### Exemple d'envoi de message
 
@@ -215,6 +217,15 @@ socket.emit('send_message',
 | npm run dev | Démarrer en développement (nodemon) |
 | npm start | Démarrer en production |
 | npm run init-db Réinitialiser la base de données |
+| npm run seed | Génération de 500 profils de test (randomuser.me) |
+
+## 🌱 Génération des profils de test
+
+Pour générer 500 profils de test :
+
+```bash
+npm run seed
+```
 
 ## 🔒 Sécurité
 

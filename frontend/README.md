@@ -1,16 +1,118 @@
-# React + Vite
+# Matcha - Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Application frontend pour Matcha, une plateforme de rencontre. Développée avec React, Vite et Socket.io.
 
-Currently, two official plugins are available:
+## 🚀 Technologies utilisées
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- **React 19** - Bibliothèque UI
+- **Vite** - Build tool
+- **React Router DOM** - Navigation
+- **Socket.io-client** - Chat et notifications temps réel
+- **CSS Modules** - Styles
 
-## React Compiler
+## 📋 Prérequis
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- Node.js (v18 ou supérieur)
+- Backend Matcha en cours d'exécution (port 3000)
 
-## Expanding the ESLint configuration
+## 🔧 Installation
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+### 1. Cloner le repository
+
+```bash
+git clone <your-repo-url>
+cd frontend
+```
+
+### 2. Installer les dépendances
+
+```bash
+npm install
+```
+
+### 3. Configurer les variables d'environnement
+
+Crée un fichier .env à la racine :
+```env
+VITE_API_URL=http://localhost:3000/API
+```
+
+### 4. Démarrer l'application
+
+```bash
+npm run dev
+```
+
+## 📁 Structure du projet
+
+```text
+frontend/
+├── src/
+│   ├── assets/
+│   │   └── css/           # Styles globaux et composants
+│   ├── components/        # Composants réutilisables
+│   │   ├── Avatar.jsx
+│   │   ├── NotificationBell.jsx
+│   │   ├── ProtectedRoute.jsx
+│   │   └── UserCard.jsx
+│   ├── context/           # Contextes React
+│   │   ├── AuthContext.jsx
+│   │   ├── NotificationContext.jsx
+│   │   └── SocketContext.jsx
+│   ├── layouts/           # Layout principal
+│   │   └── MainLayout.jsx
+│   ├── pages/             # Pages de l'application
+│   │   ├── Login.jsx
+│   │   ├── Search.jsx
+│   │   ├── Profile.jsx
+│   │   ├── PublicProfile.jsx
+│   │   └── Chat.jsx
+│   ├── utils/             # Utilitaires
+│   │   └── age.js
+│   ├── config/            # Configuration
+│   │   └── api.js
+│   ├── App.jsx
+│   └── main.jsx
+├── public/
+├── .env
+├── index.html
+├── package.json
+└── vite.config.js
+```
+
+## 🎯 Fonctionnalités
+
+| Page       | Description |
+|------------|-------------|
+| /login | Connexion et inscriptionInscription |
+| /search | Recherche et suggestions de profils |
+| /profile | Gestion de son profil (bio, tags, photos) |
+| /profile/:id | Consultation de profil public |
+| /chat | Messagerie en temps réel |
+
+## 🔌 WebSocket
+
+L'application utilise Socket.io pour :
+
+- Messages instantanés
+- Notifications temps réel
+- Statut en ligne des utilisateurs
+
+```javascript
+// Connexion automatique via le contexte SocketContext
+const socket = useSocket();
+```
+
+## 📱 Responsive
+
+L'interface est adaptée aux :
+
+- Ordinateurs de bureau (≥ 1440px)
+- Tablettes (768px - 1440px)
+- Mobiles (< 768px)
+
+## 🔐 Authentification
+
+- Stockage du token JWT dans localStorage
+- Header Authorization: Bearer <token> pour les requêtes API
+- Redirection automatique vers /login si non authentifié
