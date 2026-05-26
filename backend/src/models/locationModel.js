@@ -1,15 +1,30 @@
-const pool = require('../db/pool');
+const pool = require("../db/pool");
 
 const locationModel = {
   // Mettre à jour la localisation GPS
-  async updateGps(userId, latitude, longitude) {
-    const result = await pool.query(
-      `UPDATE users 
-       SET latitude = $1, longitude = $2, location_manual = FALSE, updated_at = NOW()
-       WHERE id = $3
-       RETURNING id, latitude, longitude, location_city, location_manual`,
-      [latitude, longitude, userId]
-    );
+  async updateGps(userId, latitude, longitude, city = null) {
+    let query;
+    let params;
+
+    if (city) {
+      query = `
+      UPDATE users 
+      SET latitude = $1, longitude = $2, location_city = $3, location_manual = FALSE, updated_at = NOW()
+      WHERE id = $4
+      RETURNING id, latitude, longitude, location_city, location_manual
+    `;
+      params = [latitude, longitude, city, userId];
+    } else {
+      query = `
+      UPDATE users 
+      SET latitude = $1, longitude = $2, location_manual = FALSE, updated_at = NOW()
+      WHERE id = $3
+      RETURNING id, latitude, longitude, location_city, location_manual
+    `;
+      params = [latitude, longitude, userId];
+    }
+
+    const result = await pool.query(query, params);
     return result.rows[0] || null;
   },
 
@@ -20,7 +35,7 @@ const locationModel = {
        SET location_city = $1, location_manual = TRUE, latitude = NULL, longitude = NULL, updated_at = NOW()
        WHERE id = $2
        RETURNING id, latitude, longitude, location_city, location_manual`,
-      [city, userId]
+      [city, userId],
     );
     return result.rows[0] || null;
   },
@@ -30,7 +45,7 @@ const locationModel = {
     const result = await pool.query(
       `SELECT latitude, longitude, location_city, location_manual 
        FROM users WHERE id = $1`,
-      [userId]
+      [userId],
     );
     return result.rows[0] || null;
   },
@@ -42,10 +57,10 @@ const locationModel = {
        SET latitude = NULL, longitude = NULL, location_city = NULL, location_manual = FALSE, updated_at = NOW()
        WHERE id = $1
        RETURNING id, latitude, longitude, location_city, location_manual`,
-      [userId]
+      [userId],
     );
     return result.rows[0] || null;
-  }
+  },
 };
 
 module.exports = locationModel;

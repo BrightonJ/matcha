@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useNavigate } from "react-router-dom";
 import API_URL from "../config/api";
-import { calculateAge } from '../utils/age';
 import "../assets/css/profile.css";
 
 function Profile() {
@@ -32,10 +31,11 @@ function Profile() {
   const [likers, setLikers] = useState([]);
   const [showPreview, setShowPreview] = useState(false);
 
+  const token = localStorage.getItem("token");
+
   // Charger tous les tags disponibles depuis le backend
   const fetchAvailableTags = async () => {
     try {
-      const token = localStorage.getItem("token");
       const response = await fetch(`${API_URL}/tags`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -52,7 +52,6 @@ function Profile() {
   // Charger le profil utilisateur
   const fetchProfile = async () => {
     try {
-      const token = localStorage.getItem("token");
       const response = await fetch(`${API_URL}/profile/me`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -67,7 +66,7 @@ function Profile() {
           firstName: data.first_name || "",
           lastName: data.last_name || "",
           email: data.email || "",
-          birthDate: data.birth_date ? data.birth_date.split('T')[0] : "",
+          birthDate: data.birth_date ? data.birth_date.split("T")[0] : "",
         });
       }
     } catch (err) {
@@ -78,7 +77,6 @@ function Profile() {
   // Charger les tags de l'utilisateur
   const fetchUserTags = async () => {
     try {
-      const token = localStorage.getItem("token");
       const response = await fetch(`${API_URL}/tags/me`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -95,7 +93,6 @@ function Profile() {
   // Charger les photos
   const fetchUserPhotos = async () => {
     try {
-      const token = localStorage.getItem("token");
       const response = await fetch(`${API_URL}/photos/me`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -114,7 +111,6 @@ function Profile() {
   // Charger les visiteurs
   const fetchVisitors = async () => {
     try {
-      const token = localStorage.getItem("token");
       const response = await fetch(`${API_URL}/profile/visitors`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -131,7 +127,6 @@ function Profile() {
   // Charger les likers
   const fetchLikers = async () => {
     try {
-      const token = localStorage.getItem("token");
       const response = await fetch(`${API_URL}/likes/received`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -170,7 +165,6 @@ function Profile() {
     }
 
     try {
-      const token = localStorage.getItem("token");
       const response = await fetch(`${API_URL}/tags/me`, {
         method: "POST",
         headers: {
@@ -197,7 +191,6 @@ function Profile() {
   const removeTag = async (indexToRemove) => {
     const tagToRemove = tags[indexToRemove].substring(1);
     try {
-      const token = localStorage.getItem("token");
       const response = await fetch(`${API_URL}/tags/me/${tagToRemove}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
@@ -228,7 +221,6 @@ function Profile() {
       formData.append("photo", file);
 
       try {
-        const token = localStorage.getItem("token");
         const response = await fetch(`${API_URL}/photos/upload`, {
           method: "POST",
           headers: { Authorization: `Bearer ${token}` },
@@ -255,7 +247,6 @@ function Profile() {
 
   const setMainPhoto = async (photoId) => {
     try {
-      const token = localStorage.getItem("token");
       const response = await fetch(`${API_URL}/photos/profile/${photoId}`, {
         method: "PUT",
         headers: { Authorization: `Bearer ${token}` },
@@ -274,7 +265,6 @@ function Profile() {
 
   const removePhoto = async (photoId, index) => {
     try {
-      const token = localStorage.getItem("token");
       const response = await fetch(`${API_URL}/photos/${photoId}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
@@ -304,31 +294,14 @@ function Profile() {
           try {
             const { latitude, longitude } = pos.coords;
 
-            // 1. Envoyer les coordonnées GPS au backend
-            const token = localStorage.getItem("token");
-            const gpsResponse = await fetch(`${API_URL}/location/gps`, {
-              method: "PUT",
-              headers: {
-                Authorization: `Bearer ${token}`,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({ latitude, longitude }),
-            });
-
-            if (!gpsResponse.ok) {
-              throw new Error("Erreur lors de l'envoi des coordonnées");
-            }
-
-            // 2. Convertir les coordonnées en nom de ville (geocoding inverse)
+            // 1. Convertir les coordonnées en nom de ville
             const geoResponse = await fetch(
               `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=10&addressdetails=1`,
             );
 
+            let city = "";
             if (geoResponse.ok) {
               const geoData = await geoResponse.json();
-
-              // Extraire la ville
-              let city = "";
               if (geoData.address) {
                 city =
                   geoData.address.city ||
@@ -336,42 +309,53 @@ function Profile() {
                   geoData.address.village ||
                   geoData.address.suburb ||
                   geoData.address.county ||
-                  "Position inconnue";
+                  `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
               } else {
-                city = `Lat: ${latitude.toFixed(4)}, Lon: ${longitude.toFixed(4)}`;
+                city = `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
               }
+            } else {
+              city = `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+            }
 
-              // 3. Mettre à jour le champ manuel avec la ville trouvée
-              setProfileData((prev) => ({ ...prev, locationCity: city }));
+            // 2. Envoyer les coordonnées GPS au backend avec la ville
+            const gpsResponse = await fetch(`${API_URL}/location/gps`, {
+              method: "PUT",
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ latitude, longitude, city }),
+            });
 
-              // Optionnel : sauvegarder automatiquement la ville
-              const updateResponse = await fetch(`${API_URL}/profile/me`, {
-                method: "PUT",
-                headers: {
-                  Authorization: `Bearer ${token}`,
-                  "Content-Type": "application/json",
-                },
-                body: JSON.stringify({
-                  ...profileData,
-                  locationCity: city,
-                }),
+            if (!gpsResponse.ok) {
+              throw new Error("Erreur lors de l'envoi des coordonnées");
+            }
+
+            // 3. Mettre à jour le champ manuel avec la ville trouvée
+            setProfileData((prev) => ({ ...prev, locationCity: city }));
+
+            // 4. Sauvegarder la ville dans le backend
+            const updateResponse = await fetch(`${API_URL}/profile/me`, {
+              method: "PUT",
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                ...profileData,
+                locationCity: city,
+              }),
+            });
+
+            if (updateResponse.ok) {
+              setMessage({
+                type: "success",
+                text: `📍 Localisation mise à jour : ${city}`,
               });
-
-              if (updateResponse.ok) {
-                setMessage({
-                  type: "success",
-                  text: `📍 Localisation mise à jour : ${city}`,
-                });
-              } else {
-                setMessage({
-                  type: "success",
-                  text: `📍 Position GPS enregistrée : ${city}`,
-                });
-              }
             } else {
               setMessage({
                 type: "success",
-                text: "📍 Position GPS enregistrée !",
+                text: `📍 Position GPS enregistrée : ${city}`,
               });
             }
           } catch (err) {
@@ -416,7 +400,6 @@ function Profile() {
     setLoading(true);
 
     try {
-      const token = localStorage.getItem("token");
       const response = await fetch(`${API_URL}/profile/me`, {
         method: "PUT",
         headers: {
@@ -461,16 +444,13 @@ function Profile() {
   // Aperçu du profil public
   const PreviewProfile = ({ onClose }) => {
     const profilePhoto = photos.find((p) => p.is_profile);
-    const age = calculateAge(profileData.birthDate);
+    const displayName = user?.username || "You";
 
-    // Fermer si on clique sur l'overlay (fond noir)
     const handleOverlayClick = (e) => {
       if (e.target === e.currentTarget) {
         onClose();
       }
     };
-
-    const displayName = profileData.firstName || user?.username || "You";
 
     return (
       <div className="preview-overlay" onClick={handleOverlayClick}>
@@ -494,7 +474,7 @@ function Profile() {
             </div>
             <div className="preview-info">
               <h2>
-                {profileData.firstName} {profileData.lastName}, {age}
+                {profileData.firstName} {profileData.lastName}
               </h2>
               <p className="preview-username">@{user?.username}</p>
               {profileData.locationCity && (
@@ -589,6 +569,15 @@ function Profile() {
                 />
               </div>
               <div className="form-group">
+                <label>Birth Date</label>
+                <input
+                  type="date"
+                  name="birthDate"
+                  value={profileData.birthDate}
+                  onChange={handleInputChange}
+                />
+              </div>
+              <div className="form-group">
                 <label>Gender</label>
                 <select
                   name="gender"
@@ -612,15 +601,6 @@ function Profile() {
                   <option value="male">Men</option>
                   <option value="female">Women</option>
                 </select>
-              </div>
-              <div className="form-group">
-                <label>Birth Date</label>
-                <input
-                  type="date"
-                  name="birthDate"
-                  value={profileData.birthDate}
-                  onChange={handleInputChange}
-                />
               </div>
             </div>
           </div>
@@ -770,9 +750,18 @@ function Profile() {
         <div className="history-list">
           {viewers.length > 0 ? (
             viewers.map((v) => (
-              <div key={v.visitor_id} className="history-item">
+              <div
+                key={v.visitor_id}
+                className="history-item"
+                onClick={() => navigate(`/profile/${v.visitor_id}`)}
+                style={{ cursor: "pointer" }}
+              >
                 <img
-                  src={v.profile_photo || "/default-avatar.png"}
+                  src={
+                    v.profile_photo
+                      ? `${API_URL.replace("/api", "")}${v.profile_photo}`
+                      : "/default-avatar.png"
+                  }
                   alt={v.username}
                 />
                 <div className="history-info">
@@ -795,9 +784,18 @@ function Profile() {
         <div className="history-list">
           {likers.length > 0 ? (
             likers.map((l) => (
-              <div key={l.id} className="history-item">
+              <div
+                key={l.id}
+                className="history-item"
+                onClick={() => navigate(`/profile/${l.from_user_id}`)}
+                style={{ cursor: "pointer" }}
+              >
                 <img
-                  src={l.profile_photo || "/default-avatar.png"}
+                  src={
+                    l.profile_photo
+                      ? `${API_URL.replace("/api", "")}${l.profile_photo}`
+                      : "/default-avatar.png"
+                  }
                   alt={l.username}
                 />
                 <div className="history-info">

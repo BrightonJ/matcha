@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS users (
     location_manual BOOLEAN DEFAULT FALSE,
     popularity_score DECIMAL(5,2) DEFAULT 0,
     last_seen TIMESTAMP DEFAULT NOW(),
+    is_online BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
 );

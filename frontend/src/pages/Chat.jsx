@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { io } from 'socket.io-client';
+import { useSocket } from '../context/SocketContext';
 import API_URL from '../config/api';
 import '../assets/css/chat.css';
 
@@ -8,49 +8,61 @@ function Chat() {
   const [messageText, setMessageText] = useState('');
   const [messages, setMessages] = useState({});
   const [matches, setMatches] = useState([]);
-  const [socket, setSocket] = useState(null);
   const [loading, setLoading] = useState(true);
   const messagesEndRef = useRef(null);
+  const socket = useSocket();
   
   const token = localStorage.getItem('token');
 
-  // Initialiser Socket.io
+  // Écouter les événements socket
   useEffect(() => {
-    const newSocket = io(API_URL.replace('/api', ''), {
-      auth: { token }
-    });
-    
-    newSocket.on('connect', () => {
-      console.log('Socket connected');
-    });
-    
-    newSocket.on('new_message', (message) => {
-      console.log('New message received:', message);
-      
-      // Ajouter le message à la conversation
-      setMessages(prev => {
-        const otherUserId = message.from_user_id === activeMatch?.id 
-          ? message.from_user_id 
-          : message.to_user_id;
-        
-        return {
-          ...prev,
-          [otherUserId]: [...(prev[otherUserId] || []), message]
-        };
-      });
-      
-      // Notification sonore (optionnel)
-      if (message.from_user_id !== activeMatch?.id) {
-        // Jouer un son ou une notification
-      }
-    });
-    
-    setSocket(newSocket);
-    
-    return () => newSocket.close();
-  }, [token]);
+    if (!socket) return;
 
-  // Récupérer les matchs et les conversations
+    const handleNewMessage = (message) => {
+      console.log('📩 Nouveau message reçu:', message);
+      
+      const otherUserId = message.from_user_id === socket.userId 
+        ? message.to_user_id 
+        : message.from_user_id;
+      
+      setMessages(prev => ({
+        ...prev,
+        [otherUserId]: [...(prev[otherUserId] || []), message]
+      }));
+      
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 100);
+      
+      if (activeMatch?.id === otherUserId) {
+        socket.emit('mark_read', { fromUserId: otherUserId });
+      }
+    };
+
+    const handleUserStatus = (data) => {
+      console.log('🟢 Statut utilisateur changé (chat):', data);
+      
+      setMatches(prev => prev.map(match => 
+        match.id === data.userId 
+          ? { ...match, is_online: data.isOnline }
+          : match
+      ));
+      
+      if (activeMatch && activeMatch.id === data.userId) {
+        setActiveMatch(prev => ({ ...prev, is_online: data.isOnline }));
+      }
+    };
+
+    socket.on('new_message', handleNewMessage);
+    socket.on('user_status', handleUserStatus);
+
+    return () => {
+      socket.off('new_message', handleNewMessage);
+      socket.off('user_status', handleUserStatus);
+    };
+  }, [socket, activeMatch]);
+
+  // Récupérer les matchs
   useEffect(() => {
     const fetchMatches = async () => {
       try {
@@ -67,11 +79,14 @@ function Chat() {
       }
     };
     
-    fetchMatches();
+    if (token) {
+      fetchMatches();
+    }
   }, [token]);
 
   // Récupérer les messages d'une conversation
   const fetchConversation = async (userId) => {
+    setLoading(true);
     try {
       const response = await fetch(`${API_URL}/messages/${userId}`, {
         headers: { 'Authorization': `Bearer ${token}` }
@@ -86,19 +101,22 @@ function Chat() {
       }
     } catch (err) {
       console.error('Erreur récupération messages:', err);
+    } finally {
+      setLoading(false);
     }
   };
 
   // Sélectionner un match
   const selectMatch = async (match) => {
     setActiveMatch(match);
-    setLoading(true);
     
     if (!messages[match.id]) {
       await fetchConversation(match.id);
     }
     
-    setLoading(false);
+    if (socket) {
+      socket.emit('mark_read', { fromUserId: match.id });
+    }
   };
 
   // Envoyer un message
@@ -108,44 +126,43 @@ function Chat() {
     
     const newMessage = {
       toUserId: activeMatch.id,
-      content: messageText,
-      timestamp: new Date()
+      content: messageText
     };
     
-    // Envoyer via Socket.io
     socket.emit('send_message', newMessage, (response) => {
-      if (response.success) {
-        // Ajouter le message à l'UI
+      if (response && response.success) {
         setMessages(prev => ({
           ...prev,
           [activeMatch.id]: [...(prev[activeMatch.id] || []), response.message]
         }));
         
-        // Marquer comme lu
-        socket.emit('mark_read', { fromUserId: activeMatch.id });
-      } else {
-        console.error('Erreur envoi:', response.error);
+        setMessageText('');
+        
+        setTimeout(() => {
+          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }, 100);
+      } else if (response && response.error) {
+        console.error('Erreur:', response.error);
+        alert(response.error);
       }
     });
-    
-    setMessageText('');
   };
 
-  // Marquer les messages comme lus quand la conversation est ouverte
-  useEffect(() => {
-    if (activeMatch && socket) {
-      socket.emit('mark_read', { fromUserId: activeMatch.id });
-    }
-  }, [activeMatch, socket]);
-
-  // Scroll vers le bas quand nouveaux messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, activeMatch]);
 
   const formatTime = (dateStr) => {
+    if (!dateStr) return '';
     const date = new Date(dateStr);
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
+  const getProfilePhoto = (match) => {
+    if (match.profile_photo) {
+      return `${API_URL.replace('/api', '')}${match.profile_photo}`;
+    }
+    return `https://ui-avatars.com/api/?background=8baa5e&color=fff&rounded=true&name=${encodeURIComponent(match.first_name || match.username || 'User')}`;
   };
 
   if (matches.length === 0) {
@@ -173,16 +190,14 @@ function Chat() {
               onClick={() => selectMatch(match)}
             >
               <img 
-                src={match.profile_photo || '/default-avatar.png'} 
+                src={getProfilePhoto(match)} 
                 alt={match.username} 
               />
               <div className="match-info">
                 <h4>{match.first_name} {match.last_name}</h4>
                 <p>@{match.username}</p>
+                {match.is_online && <span className="online-status">🟢 En ligne</span>}
               </div>
-              {match.last_seen && (
-                <span className={`online-status ${match.is_online ? 'online' : 'offline'}`}></span>
-              )}
             </div>
           ))}
         </div>
@@ -193,12 +208,17 @@ function Chat() {
           <>
             <div className="chat-header">
               <img 
-                src={activeMatch.profile_photo || '/default-avatar.png'} 
+                src={getProfilePhoto(activeMatch)} 
                 alt={activeMatch.username} 
               />
               <div className="chat-header-info">
                 <h3>{activeMatch.first_name} {activeMatch.last_name}</h3>
                 <p>@{activeMatch.username}</p>
+                {activeMatch.is_online ? (
+                  <span className="online-badge">🟢 En ligne</span>
+                ) : (
+                  <span className="offline-badge">⚪ Hors ligne</span>
+                )}
               </div>
             </div>
             

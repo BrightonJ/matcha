@@ -1,8 +1,8 @@
 import { Link } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import API_URL from '../config/api';
-import '../assets/css/components.css';
 import { calculateAge } from '../utils/age';
+import '../assets/css/components.css';
 
 function UserCard({ user, currentUserTags = [] }) {
   const [isLiked, setIsLiked] = useState(false);
@@ -31,15 +31,15 @@ function UserCard({ user, currentUserTags = [] }) {
     }
   }, [user.id]);
 
-  // Calculer le nombre de tags communs
-  const getCommonTagsCount = () => {
-    if (!user.tags || !currentUserTags.length) return 0;
-    return user.tags.filter(tag => currentUserTags.includes(tag)).length;
-  };
+  const age = calculateAge(user.birth_date);
+  const location = user.location_city || user.location || 'Location inconnue';
+  const tags = user.tags || [];
+  const profilePhoto = user.profile_photo 
+    ? `${API_URL.replace('/api', '')}${user.profile_photo}` 
+    : '/default-avatar.png';
 
-  // Gérer le like
   const handleLike = async (e) => {
-    e.preventDefault(); // Empêcher la navigation
+    e.preventDefault();
     if (likeLoading) return;
     
     setLikeLoading(true);
@@ -70,12 +70,6 @@ function UserCard({ user, currentUserTags = [] }) {
     }
   };
 
-  const age = calculateAge(user.birth_date);
-  const location = user.location_city || user.location || 'Location inconnue';
-  const tags = user.tags || [];
-  const commonTagsCount = getCommonTagsCount();
-  const profilePhoto = user.profile_photo || user.profilePic || '/default-avatar.png';
-
   return (
     <Link to={`/profile/${user.id}`} className="user-card" style={{ display: 'block', textDecoration: 'none' }}>
       <div className="user-card-image">
@@ -93,9 +87,6 @@ function UserCard({ user, currentUserTags = [] }) {
         </div>
         <div className="card-footer">
           <span className="fame-rating">🔥 {user.popularity_score || 0} Fame</span>
-          {commonTagsCount > 0 && (
-            <span className="common-tags">🎯 {commonTagsCount} tags</span>
-          )}
           <button 
             className={`like-btn ${isLiked ? 'liked' : ''}`} 
             onClick={handleLike}

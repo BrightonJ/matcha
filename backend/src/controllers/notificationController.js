@@ -45,4 +45,21 @@ const getUnreadCount = async (req, res) => {
   }
 };
 
-module.exports = { getMyNotifications, markAsRead, markAllAsRead, getUnreadCount };
+// Supprimer une notification
+const deleteNotification = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await notification.delete(parseInt(id), req.userId);
+    
+    if (!result) {
+      return res.status(404).json({ error: 'Notification non trouvée' });
+    }
+    
+    res.json({ message: 'Notification supprimée' });
+  } catch (error) {
+    console.error('Erreur:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+};
+
+module.exports = { getMyNotifications, markAsRead, markAllAsRead, getUnreadCount, deleteNotification };

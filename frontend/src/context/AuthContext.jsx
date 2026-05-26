@@ -7,21 +7,40 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // Fonction de déconnexion
+  const logout = () => {
+    localStorage.removeItem('token');
+    setUser(null);
+    
+    // Fermer la socket
+    if (window.socket) {
+      window.socket.disconnect();
+      window.socket = null;
+    }
+  };
+
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (token) {
       fetch(`${API_URL}/profile/me`, {
         headers: { 'Authorization': `Bearer ${token}` }
       })
-        .then(res => res.json())
+        .then(async res => {
+          if (res.status === 401) {
+            // Token invalide ou expiré
+            logout();
+            return null;
+          }
+          return res.json();
+        })
         .then(data => {
-          if (data.id) {
+          if (data && data.id) {
             setUser(data);
-          } else {
-            localStorage.removeItem('token');
           }
         })
-        .catch(() => localStorage.removeItem('token'))
+        .catch(() => {
+          logout();
+        })
         .finally(() => setLoading(false));
     } else {
       setLoading(false);
@@ -75,11 +94,6 @@ export const AuthProvider = ({ children }) => {
     } catch (error) {
       return { success: false, error: error.message };
     }
-  };
-
-  const logout = () => {
-    localStorage.removeItem('token');
-    setUser(null);
   };
 
   return (

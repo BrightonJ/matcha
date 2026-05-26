@@ -1,65 +1,45 @@
-const { like } = require("../models");
-const { block: blockModel } = require("../models");
+const { like } = require('../models');
+const { getIo } = require('../socket');
 
 // Liker un utilisateur
 const addLike = async (req, res) => {
   try {
     const { userId } = req.params;
     const toUserId = parseInt(userId);
-
+    
     if (isNaN(toUserId)) {
-      return res.status(400).json({ error: "ID utilisateur invalide" });
+      return res.status(400).json({ error: 'ID utilisateur invalide' });
     }
-
+    
     if (toUserId === req.userId) {
-      return res
-        .status(400)
-        .json({ error: "Vous ne pouvez pas vous liker vous-même" });
+      return res.status(400).json({ error: 'Vous ne pouvez pas vous liker vous-même' });
     }
-
-    // Vérifier si l'un des deux a bloqué l'autre
-    const blockedHim = await blockModel.isBlocked(req.userId, toUserId);
-    const blockedByHim = await blockModel.isBlocked(toUserId, req.userId);
-
-    if (blockedHim || blockedByHim) {
-      return res.status(403).json({ error: "Vous ne pouvez pas liker ce profil" });
-    }
-
-    const result = await like.add(req.userId, toUserId);
-
+    
+    const io = getIo();
+    const result = await like.add(req.userId, toUserId, io);
+    
     if (result.isMatch) {
-      res.json({
-        message: "C'est un match ! Vous pouvez maintenant discuter",
-        match: true,
+      res.json({ 
+        message: '❤️ C\'est un match ! Vous pouvez maintenant discuter',
+        match: true
       });
     } else {
-      res.json({
-        message: "Like ajouté",
-        match: false,
+      res.json({ 
+        message: '👍 Like ajouté',
+        match: false
       });
     }
   } catch (error) {
-    console.error("Erreur:", error);
-
-    // Gestion des erreurs client (400)
-    if (error.code === "USER_NOT_FOUND") {
+    console.error('Erreur:', error);
+    
+    if (error.code === 'USER_NOT_FOUND' || 
+        error.code === 'NO_PROFILE_PHOTO' || 
+        error.code === 'LIKE_ALREADY_EXISTS' ||
+        error.code === 'BLOCKED') {
       return res.status(400).json({ error: error.message });
     }
-    if (error.code === "NO_PROFILE_PHOTO") {
-      return res.status(400).json({ error: error.message });
-    }
-    if (error.code === "LIKE_ALREADY_EXISTS") {
-      return res.status(400).json({ error: error.message });
-    }
-    if (error.message === "Utilisateur cible inexistant") {
-      return res.status(400).json({ error: error.message });
-    }
-    if (error.message === "Vous devez avoir une photo de profil pour liker") {
-      return res.status(400).json({ error: error.message });
-    }
-
-    // Erreur serveur (500)
-    res.status(500).json({ error: "Erreur serveur" });
+    
+    res.status(500).json({ error: 'Erreur serveur' });
   }
 };
 
@@ -68,21 +48,22 @@ const removeLike = async (req, res) => {
   try {
     const { userId } = req.params;
     const toUserId = parseInt(userId);
-
+    
     if (isNaN(toUserId)) {
-      return res.status(400).json({ error: "ID utilisateur invalide" });
+      return res.status(400).json({ error: 'ID utilisateur invalide' });
     }
-
-    const removed = await like.remove(req.userId, toUserId);
-
+    
+    const io = getIo();
+    const removed = await like.remove(req.userId, toUserId, io);
+    
     if (!removed) {
-      return res.status(404).json({ error: "Like non trouvé" });
+      return res.status(404).json({ error: 'Like non trouvé' });
     }
-
-    res.json({ message: "Like retiré" });
+    
+    res.json({ message: '👎 Like retiré' });
   } catch (error) {
-    console.error("Erreur:", error);
-    res.status(500).json({ error: "Erreur serveur" });
+    console.error('Erreur:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
   }
 };
 
@@ -92,8 +73,8 @@ const getReceivedLikes = async (req, res) => {
     const likes = await like.getReceivedLikes(req.userId);
     res.json(likes);
   } catch (error) {
-    console.error("Erreur:", error);
-    res.status(500).json({ error: "Erreur serveur" });
+    console.error('Erreur:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
   }
 };
 
@@ -103,8 +84,8 @@ const getSentLikes = async (req, res) => {
     const likes = await like.getSentLikes(req.userId);
     res.json(likes);
   } catch (error) {
-    console.error("Erreur:", error);
-    res.status(500).json({ error: "Erreur serveur" });
+    console.error('Erreur:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
   }
 };
 
@@ -114,8 +95,8 @@ const getMatches = async (req, res) => {
     const matches = await like.getMatches(req.userId);
     res.json(matches);
   } catch (error) {
-    console.error("Erreur:", error);
-    res.status(500).json({ error: "Erreur serveur" });
+    console.error('Erreur:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
   }
 };
 
@@ -124,24 +105,17 @@ const checkLike = async (req, res) => {
   try {
     const { userId } = req.params;
     const toUserId = parseInt(userId);
-
+    
     if (isNaN(toUserId)) {
-      return res.status(400).json({ error: "ID utilisateur invalide" });
+      return res.status(400).json({ error: 'ID utilisateur invalide' });
     }
-
+    
     const exists = await like.exists(req.userId, toUserId);
     res.json({ liked: exists });
   } catch (error) {
-    console.error("Erreur:", error);
-    res.status(500).json({ error: "Erreur serveur" });
+    console.error('Erreur:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
   }
 };
 
-module.exports = {
-  addLike,
-  removeLike,
-  getReceivedLikes,
-  getSentLikes,
-  getMatches,
-  checkLike,
-};
+module.exports = { addLike, removeLike, getReceivedLikes, getSentLikes, getMatches, checkLike };
