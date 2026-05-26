@@ -216,7 +216,7 @@ socket.emit('send_message',
 |---------------|-------------|
 | npm run dev | Démarrer en développement (nodemon) |
 | npm start | Démarrer en production |
-| npm run init-db Réinitialiser la base de données |
+| npm run init-db | Réinitialiser la base de données |
 | npm run seed | Génération de 500 profils de test (randomuser.me) |
 
 ## 🌱 Génération des profils de test
