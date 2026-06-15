@@ -1,0 +1,3262 @@
+import API_URL from '../config/api';
+
+function Avatar({ user, size = 'md', onClick }) {
+  const sizeMap = {
+    sm: 32,
+    md: 48,
+    lg: 64,
+    xl: 120
+  };
+  
+  const dimension = sizeMap[size] || 48;
+  
+  const avatarUrl = user?.profile_photo 
+    ? `${API_URL.replace('/api', '')}${user.profile_photo}` 
+    : `https://ui-avatars.com/api/?background=8baa5e&color=fff&rounded=true&name=${encodeURIComponent(user?.first_name || user?.username || 'User')}`;
+  
+  return (
+    <img 
+      src={avatarUrl}
+      alt={user?.username}
+      className={`avatar avatar-${size}`}
+      style={{ 
+        width: dimension, 
+        height: dimension, 
+        borderRadius: '50%', 
+        objectFit: 'cover',
+        cursor: onClick ? 'pointer' : 'default'
+      }}
+      onClick={onClick}
+    />
+  );
+}
+
+export default Avatar;
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useNotifications } from '../context/NotificationContext';
+import '../assets/css/notification.css';
+
+function NotificationBell() {
+  const navigate = useNavigate();
+  const { notifications, unreadCount, markAsRead, markAllAsRead, deleteNotification } = useNotifications();
+  const [isOpen, setIsOpen] = useState(false);
+
+  // Rediriger en fonction du type de notification
+  const handleNotificationClick = (notification) => {
+    // Marquer comme lue
+    if (!notification.is_read) {
+      markAsRead(notification.id);
+    }
+    
+    // Fermer le dropdown
+    setIsOpen(false);
+    
+    // Rediriger selon le type
+    switch (notification.type) {
+      case 'like':
+      case 'match':
+        // Rediriger vers le profil de la personne
+        if (notification.from_user_id) {
+          navigate(`/profile/${notification.from_user_id}`);
+        } else {
+          navigate('/search');
+        }
+        break;
+      case 'message':
+        // Rediriger vers le chat
+        if (notification.from_user_id) {
+          navigate('/chat');
+        } else {
+          navigate('/chat');
+        }
+        break;
+      case 'visit':
+        // Rediriger vers le profil du visiteur
+        if (notification.from_user_id) {
+          navigate(`/profile/${notification.from_user_id}`);
+        } else {
+          navigate('/search');
+        }
+        break;
+      default:
+        navigate('/search');
+    }
+  };
+
+  const handleDeleteClick = (e, notificationId) => {
+    e.stopPropagation();
+    deleteNotification(notificationId);
+  };
+
+  return (
+    <div className="notification-container">
+      <button 
+        className={`notification-bell ${unreadCount > 0 ? 'has-unread' : ''}`}
+        onClick={() => setIsOpen(!isOpen)}
+      >
+        🔔
+        {unreadCount > 0 && <span className="notification-badge">{unreadCount}</span>}
+      </button>
+
+      {isOpen && (
+        <div className="notification-dropdown">
+          <div className="notification-header">
+            <h4>Notifications</h4>
+            {unreadCount > 0 && (
+              <button className="mark-all-read" onClick={markAllAsRead}>
+                Tout marquer comme lu
+              </button>
+            )}
+          </div>
+          <div className="notification-list">
+            {notifications.length === 0 ? (
+              <p className="no-notifications">Aucune notification</p>
+            ) : (
+              notifications.map(notif => (
+                <div 
+                  key={notif.id} 
+                  className={`notification-item ${!notif.is_read ? 'unread' : ''}`}
+                  onClick={() => handleNotificationClick(notif)}
+                >
+                  <div className="notification-content">
+                    <p>{notif.content}</p>
+                    <small>{new Date(notif.created_at).toLocaleString()}</small>
+                  </div>
+                  <button 
+                    className="delete-notif"
+                    onClick={(e) => handleDeleteClick(e, notif.id)}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default NotificationBell;
+import { Navigate, Outlet } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+
+function ProtectedRoute() {
+  const { user } = useAuth();
+
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+
+  return <Outlet />;
+}
+
+export default ProtectedRoute;import { Link } from 'react-router-dom';
+import { useState } from 'react';
+import { calculateAge } from '../utils/age';
+import '../assets/css/components.css';
+
+function UserCard({ user, currentUserTags = [] }) {
+  const [isLiked, setIsLiked] = useState(false);
+  const [likeLoading, setLikeLoading] = useState(false);
+
+  const age = calculateAge(user.birth_date) || 25;
+  const location = user.location_city || 'Location inconnue';
+  const tags = user.tags || [];
+  const profilePhoto = `https://ui-avatars.com/api/?background=8baa5e&color=fff&name=${user.username}`;
+
+  const handleLike = (e) => {
+    e.preventDefault();
+    setLikeLoading(true);
+    setTimeout(() => {
+      setIsLiked(!isLiked);
+      setLikeLoading(false);
+      if (!isLiked) alert(`❤️ Vous avez liké ${user.first_name || user.username} ! (Simulé)`);
+    }, 300);
+  };
+
+  return (
+    <Link to={`/profile/${user.id}`} className="user-card" style={{ display: 'block', textDecoration: 'none' }}>
+      <div className="user-card-image">
+        <img src={profilePhoto} alt={`${user.username} profile`} />
+        {user.is_online && <span className="status-indicator online"></span>}
+      </div>
+      <div className="user-card-info">
+        <h3>{user.first_name || user.username}, {age}</h3>
+        <p className="location">📍 {location}</p>
+        <div className="tags-container">
+          {tags.slice(0, 3).map((tag, index) => <span key={index} className="tag">{tag}</span>)}
+        </div>
+        <div className="card-footer">
+          <span className="fame-rating">🔥 {user.popularity_score || 0} Fame</span>
+          <button className={`like-btn ${isLiked ? 'liked' : ''}`} onClick={handleLike} disabled={likeLoading}>
+            {isLiked ? '❤️ Liked' : '🤍 Like'}
+          </button>
+        </div>
+      </div>
+    </Link>
+  );
+}
+
+export default UserCard;import { Link } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import API_URL from '../config/api';
+import { calculateAge } from '../utils/age';
+import '../assets/css/components.css';
+
+function UserCard({ user, currentUserTags = [] }) {
+  const [isLiked, setIsLiked] = useState(false);
+  const [likeLoading, setLikeLoading] = useState(false);
+
+  const getPhotoUrl = (photoUrl, isExternal) => {
+    if (!photoUrl) return '/default-avatar.png';
+    if (isExternal) return photoUrl;
+    return `${API_URL.replace('/api', '')}${photoUrl}`;
+  };
+
+  useEffect(() => {
+    const checkLikeStatus = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`${API_URL}/likes/check/${user.id}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          setIsLiked(data.liked);
+        }
+      } catch (err) {
+        console.error('Erreur vérification like:', err);
+      }
+    };
+    
+    if (user.id) {
+      checkLikeStatus();
+    }
+  }, [user.id]);
+
+  const age = calculateAge(user.birth_date);
+  const location = user.location_city || user.location || 'Location inconnue';
+  const tags = user.tags || [];
+  const profilePhoto = getPhotoUrl(user.profile_photo, user.photo_is_external);
+
+  const handleLike = async (e) => {
+    e.preventDefault();
+    if (likeLoading) return;
+    
+    setLikeLoading(true);
+    
+    try {
+      const token = localStorage.getItem('token');
+      const method = isLiked ? 'DELETE' : 'POST';
+      
+      const response = await fetch(`${API_URL}/likes/${user.id}`, {
+        method: method,
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (response.ok) {
+        setIsLiked(!isLiked);
+        const data = await response.json();
+        if (data.match) {
+          alert(`❤️ C'est un match avec ${user.first_name || user.username} ! Vous pouvez maintenant discuter.`);
+        }
+      }
+    } catch (err) {
+      console.error('Erreur like:', err);
+    } finally {
+      setLikeLoading(false);
+    }
+  };
+
+  return (
+    <Link to={`/profile/${user.id}`} className="user-card" style={{ display: 'block', textDecoration: 'none' }}>
+      <div className="user-card-image">
+        <img src={profilePhoto} alt={`${user.username} profile`} />
+        {user.is_online && <span className="status-indicator online"></span>}
+      </div>
+      <div className="user-card-info">
+        <h3>{user.first_name || user.username} {user.last_name || ''}, {age}</h3>
+        <p className="location">📍 {location}</p>
+        <div className="tags-container">
+          {tags.slice(0, 3).map((tag, index) => (
+            <span key={index} className="tag">{tag}</span>
+          ))}
+          {tags.length > 3 && <span className="tag">+{tags.length - 3}</span>}
+        </div>
+        <div className="card-footer">
+          <span className="fame-rating">🔥 {user.popularity_score || 0} Fame</span>
+          <button 
+            className={`like-btn ${isLiked ? 'liked' : ''}`} 
+            onClick={handleLike}
+            disabled={likeLoading}
+          >
+            {isLiked ? '❤️ Liked' : '🤍 Like'}
+          </button>
+        </div>
+      </div>
+    </Link>
+  );
+}
+
+export default UserCard;
+// Configuration de l'URL de l'API
+
+const API_URL = import.meta.env.VITE_API_URL;
+
+export default API_URL;import { createContext, useState, useContext, useEffect } from 'react';
+
+export const AuthContext = createContext(null);
+
+export const AuthProvider = ({ children }) => {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    // Vérifier si un faux token existe au chargement
+    const token = localStorage.getItem('token');
+    if (token) {
+      setUser({ id: 99, username: 'MockUser', first_name: 'Test', last_name: 'Local' });
+    }
+    setLoading(false);
+  }, []);
+
+  const logout = () => {
+    localStorage.removeItem('token');
+    setUser(null);
+  };
+
+  const register = async (userData) => {
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    return { success: true, message: "Inscription simulée avec succès !" };
+  };
+
+  const login = async (username, password) => {
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    localStorage.setItem('token', 'fake-jwt-token');
+    setUser({ id: 99, username: username, first_name: username, last_name: 'Mock' });
+    return { success: true };
+  };
+
+  return (
+    <AuthContext.Provider value={{ user, loading, register, login, logout }}>
+      {children}
+    </AuthContext.Provider>
+  );
+};
+
+export const useAuth = () => useContext(AuthContext);import { createContext, useState, useContext, useEffect } from 'react';
+import API_URL from '../config/api';
+
+export const AuthContext = createContext(null);
+
+export const AuthProvider = ({ children }) => {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  // Fonction de déconnexion
+  const logout = () => {
+    localStorage.removeItem('token');
+    setUser(null);
+    
+    // Fermer la socket
+    if (window.socket) {
+      window.socket.disconnect();
+      window.socket = null;
+    }
+  };
+
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      fetch(`${API_URL}/profile/me`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+        .then(async res => {
+          if (res.status === 401) {
+            // Token invalide ou expiré
+            logout();
+            return null;
+          }
+          return res.json();
+        })
+        .then(data => {
+          if (data && data.id) {
+            setUser(data);
+          }
+        })
+        .catch(() => {
+          logout();
+        })
+        .finally(() => setLoading(false));
+    } else {
+      setLoading(false);
+    }
+  }, []);
+
+  const register = async (userData) => {
+    try {
+      const response = await fetch(`${API_URL}/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: userData.email,
+          username: userData.username,
+          firstName: userData.firstName,
+          lastName: userData.lastName,
+          password: userData.password
+        })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Erreur lors de l\'inscription');
+      }
+
+      return { success: true, message: data.message };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  };
+
+  const login = async (username, password) => {
+    try {
+      const response = await fetch(`${API_URL}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Erreur lors de la connexion');
+      }
+
+      localStorage.setItem('token', data.token);
+      setUser(data.user);
+
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  };
+
+  return (
+    <AuthContext.Provider value={{ user, loading, register, login, logout }}>
+      {children}
+    </AuthContext.Provider>
+  );
+};
+
+export const useAuth = () => useContext(AuthContext);
+import { createContext, useState, useContext } from 'react';
+
+export const NotificationContext = createContext(null);
+
+export const NotificationProvider = ({ children }) => {
+  const [notifications, setNotifications] = useState([
+    { id: 1, content: 'MatchaQueen a visité votre profil', is_read: false, created_at: new Date(), type: 'visit' }
+  ]);
+  const [toastMessage, setToastMessage] = useState(null);
+  const [loading] = useState(false);
+  
+  const unreadCount = notifications.filter(n => !n.is_read).length;
+
+  const markAsRead = (id) => setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
+  const markAllAsRead = () => setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
+  const deleteNotification = (id) => setNotifications(prev => prev.filter(n => n.id !== id));
+  
+  const triggerToast = (message) => {
+    setToastMessage(message);
+    setTimeout(() => setToastMessage(null), 4000);
+  };
+
+  return (
+    <NotificationContext.Provider value={{ 
+      notifications, unreadCount, loading, markAsRead, markAllAsRead, 
+      deleteNotification, triggerToast, toastMessage, refreshNotifications: () => {}
+    }}>
+      {children}
+    </NotificationContext.Provider>
+  );
+};
+
+export const useNotifications = () => useContext(NotificationContext);import { createContext, useState, useContext, useEffect } from 'react';
+import { useSocket } from './SocketContext';
+import API_URL from '../config/api';
+
+export const NotificationContext = createContext(null);
+
+export const NotificationProvider = ({ children }) => {
+  const [notifications, setNotifications] = useState([]);
+  const [toastMessage, setToastMessage] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const socket = useSocket();
+
+  const token = localStorage.getItem('token');
+  const unreadCount = notifications.filter(n => !n.is_read).length;
+
+  // Écouter les notifications via socket
+  useEffect(() => {
+    if (!socket) return;
+
+    socket.on('notification', (notification) => {
+      console.log('🔔 Nouvelle notification reçue:', notification);
+      setNotifications(prev => [notification, ...prev]);
+      setToastMessage(notification.content);
+      setTimeout(() => setToastMessage(null), 4000);
+    });
+
+    return () => {
+      socket.off('notification');
+    };
+  }, [socket]);
+
+  // Récupérer les notifications existantes
+  const fetchNotifications = async () => {
+    if (!token) return;
+    
+    try {
+      const response = await fetch(`${API_URL}/notifications`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setNotifications(data);
+      }
+    } catch (err) {
+      console.error('Erreur récupération notifications:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchNotifications();
+  }, [token]);
+
+  const markAsRead = async (notificationId) => {
+    try {
+      const response = await fetch(`${API_URL}/notifications/${notificationId}/read`, {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.ok) {
+        setNotifications(prev => 
+          prev.map(n => n.id === notificationId ? { ...n, is_read: true } : n)
+        );
+      }
+    } catch (err) {
+      console.error('Erreur marquage lu:', err);
+    }
+  };
+
+  const markAllAsRead = async () => {
+    try {
+      const response = await fetch(`${API_URL}/notifications/read-all`, {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.ok) {
+        setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
+      }
+    } catch (err) {
+      console.error('Erreur marquage tout lu:', err);
+    }
+  };
+
+  const deleteNotification = async (notificationId) => {
+    try {
+      const response = await fetch(`${API_URL}/notifications/${notificationId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.ok) {
+        setNotifications(prev => prev.filter(n => n.id !== notificationId));
+      }
+    } catch (err) {
+      console.error('Erreur suppression notification:', err);
+    }
+  };
+
+  const triggerToast = (message) => {
+    setToastMessage(message);
+    setTimeout(() => setToastMessage(null), 4000);
+  };
+
+  return (
+    <NotificationContext.Provider value={{ 
+      notifications, 
+      unreadCount,
+      loading,
+      markAsRead, 
+      markAllAsRead,
+      deleteNotification,
+      triggerToast, 
+      toastMessage,
+      refreshNotifications: fetchNotifications
+    }}>
+      {children}
+    </NotificationContext.Provider>
+  );
+};
+
+export const useNotifications = () => useContext(NotificationContext);
+import { createContext, useContext, useState, useEffect } from 'react';
+import { io } from 'socket.io-client';
+import API_URL from '../config/api';
+
+const OnlineStatusContext = createContext(null);
+
+export const useOnlineStatus = () => useContext(OnlineStatusContext);
+
+export const OnlineStatusProvider = ({ children }) => {
+  const [onlineUsers, setOnlineUsers] = useState({});
+  const token = localStorage.getItem('token');
+
+  useEffect(() => {
+    if (!token) return;
+
+    const socket = io(API_URL.replace('/api', ''), {
+      auth: { token }
+    });
+
+    socket.on('user_status', (data) => {
+      setOnlineUsers(prev => ({ ...prev, [data.userId]: data.isOnline }));
+    });
+
+    return () => socket.close();
+  }, [token]);
+
+  const isOnline = (userId) => onlineUsers[userId] || false;
+
+  return (
+    <OnlineStatusContext.Provider value={{ isOnline, onlineUsers }}>
+      {children}
+    </OnlineStatusContext.Provider>
+  );
+};
+import { createContext, useContext, useState, useEffect } from 'react';
+
+const SocketContext = createContext(null);
+export const useSocket = () => useContext(SocketContext);
+
+export const SocketProvider = ({ children }) => {
+  const [socket, setSocket] = useState(null);
+
+  useEffect(() => {
+    // On crée un faux objet socket qui ne fait rien mais empêche les crashs
+    const dummySocket = {
+      on: (event, callback) => console.log(`Socket simulé écoute: ${event}`),
+      off: (event) => console.log(`Socket simulé arrête d'écouter: ${event}`),
+      emit: (event, data, callback) => {
+        console.log(`Socket simulé émet: ${event}`, data);
+        if (callback) callback({ success: true, message: { content: data.content || 'Message simulé', created_at: new Date() }});
+      },
+      disconnect: () => console.log('Socket simulé déconnecté'),
+      userId: 99
+    };
+    
+    setSocket(dummySocket);
+  }, []);
+
+  return (
+    <SocketContext.Provider value={socket}>
+      {children}
+    </SocketContext.Provider>
+  );
+};import { createContext, useContext, useEffect, useState } from 'react';
+import { io } from 'socket.io-client';
+import API_URL from '../config/api';
+import { useAuth } from './AuthContext';
+
+const SocketContext = createContext(null);
+
+export const useSocket = () => useContext(SocketContext);
+
+export const SocketProvider = ({ children }) => {
+  const [socket, setSocket] = useState(null);
+  const { user } = useAuth();
+  const token = localStorage.getItem('token');
+
+  useEffect(() => {
+    // Ne créer la socket que si on a un utilisateur connecté
+    if (!token || !user) {
+      if (socket) {
+        console.log('🔌 Déconnexion socket (pas d\'utilisateur)');
+        socket.disconnect();
+        setSocket(null);
+      }
+      return;
+    }
+
+    console.log('🔌 Création de la socket pour utilisateur:', user.id);
+
+    const newSocket = io(API_URL.replace('/api', ''), {
+      auth: { token },
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      timeout: 20000
+    });
+
+    newSocket.on('connect', () => {
+      console.log('🔌 Socket connectée pour utilisateur:', user.id);
+    });
+
+    newSocket.on('disconnect', (reason) => {
+      console.log('🔌 Socket déconnectée:', reason);
+    });
+
+    newSocket.on('connect_error', (err) => {
+      console.error('❌ Erreur de connexion socket:', err.message);
+      if (err.message === 'Authentication error') {
+        newSocket.disconnect();
+        localStorage.removeItem('token');
+        window.location.href = '/login';
+      }
+    });
+
+    setSocket(newSocket);
+    
+    // Exposer la socket globalement pour le logout
+    window.socket = newSocket;
+
+    return () => {
+      console.log('🔌 Nettoyage socket');
+      newSocket.disconnect();
+      if (window.socket === newSocket) {
+        window.socket = null;
+      }
+    };
+  }, [token, user]);
+
+  return (
+    <SocketContext.Provider value={socket}>
+      {children}
+    </SocketContext.Provider>
+  );
+};
+import { Outlet, Link, useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+import { useNotifications } from '../context/NotificationContext';
+import NotificationBell from '../components/NotificationBell';
+import Avatar from '../components/Avatar';
+import '../assets/css/layout.css';
+import '../assets/css/notification.css';
+
+function MainLayout() {
+  const navigate = useNavigate();
+  const { user, logout } = useAuth();
+  const { toastMessage } = useNotifications();
+
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
+  };
+
+  return (
+    <div className="layout-container">
+      <header className="navbar">
+        <div className="nav-brand">
+          <Link to="/search">Matcha Cafe</Link>
+        </div>
+        <div className="nav-links">
+          <Link to="/search">Search</Link>
+          <Link to="/profile">Profile</Link>
+          <Link to="/chat">Chat</Link>
+          <NotificationBell />
+          {/* Clic sur l'Avatar = Vue publique de mon profil */}
+          {user && <Avatar user={user} size="sm" onClick={() => navigate('/user/99')} />}
+          <button onClick={handleLogout} className="logout-btn">Logout</button>
+        </div>
+      </header>
+      
+      <main className="main-content">
+        <Outlet />
+      </main>
+      
+      <footer className="footer">
+        <p>© 2026 Matcha Cafe. Brewed with love.</p>
+      </footer>
+
+      {toastMessage && (
+        <div className="toast-container">
+          {toastMessage}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default MainLayout;[
+  { "id": 1, "username": "LatteArtKing", "first_name": "Julien", "last_name": "Dubois", "birth_date": "1995-05-15", "gender": "male", "popularity_score": 85, "location_city": "Paris", "tags": ["#coffee", "#art", "#vegan"], "is_online": true },
+  { "id": 2, "username": "MatchaQueen", "first_name": "Sarah", "last_name": "Martin", "birth_date": "1999-10-22", "gender": "female", "popularity_score": 92, "location_city": "Lyon", "tags": ["#matcha", "#geek", "#piercing"], "is_online": false },
+  { "id": 3, "username": "EspressoShot", "first_name": "Marc", "last_name": "Lefebvre", "birth_date": "1990-03-10", "gender": "male", "popularity_score": 45, "location_city": "Marseille", "tags": ["#sport", "#coffee", "#travel"], "is_online": true }
+]import { useState, useRef, useEffect } from 'react';
+import mockUsers from '../mocks/users.json';
+import '../assets/css/chat.css';
+
+function Chat() {
+  // On utilise nos mockUsers comme "Matchs"
+  const matches = mockUsers.slice(0, 2); 
+  const [activeMatch, setActiveMatch] = useState(null);
+  const [messageText, setMessageText] = useState('');
+  const [messages, setMessages] = useState({});
+  const messagesEndRef = useRef(null);
+
+  const handleSendMessage = (e) => {
+    e.preventDefault();
+    if (!messageText.trim() || !activeMatch) return;
+    
+    const newMessage = {
+      id: Date.now(),
+      from_user_id: 99, // Ton faux ID local
+      content: messageText,
+      created_at: new Date().toISOString()
+    };
+    
+    setMessages(prev => ({
+      ...prev,
+      [activeMatch.id]: [...(prev[activeMatch.id] || []), newMessage]
+    }));
+    
+    setMessageText('');
+  };
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, activeMatch]);
+
+  return (
+    <div className="chat-container">
+      <div className="chat-sidebar">
+        <div className="chat-sidebar-header"><h2>Your Matches</h2></div>
+        <div className="matches-list">
+          {matches.map(match => (
+            <div key={match.id} className={`match-item ${activeMatch?.id === match.id ? 'active' : ''}`} onClick={() => setActiveMatch(match)}>
+              <img src={`https://ui-avatars.com/api/?background=8baa5e&color=fff&name=${match.username}`} alt={match.username} />
+              <div className="match-info"><h4>{match.first_name}</h4></div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="chat-main">
+        {activeMatch ? (
+          <>
+            <div className="chat-header">
+              <h3>{activeMatch.first_name} {activeMatch.last_name}</h3>
+            </div>
+            <div className="chat-messages">
+              {(messages[activeMatch.id] || []).map((msg) => (
+                <div key={msg.id} className={`message-bubble ${msg.from_user_id === 99 ? 'sent' : 'received'}`}>
+                  <p>{msg.content}</p>
+                </div>
+              ))}
+              <div ref={messagesEndRef} />
+            </div>
+            <form className="chat-input-area" onSubmit={handleSendMessage}>
+              <input type="text" placeholder="Type a message..." value={messageText} onChange={(e) => setMessageText(e.target.value)} />
+              <button type="submit" className="send-btn">Send</button>
+            </form>
+          </>
+        ) : (
+          <div className="empty-chat"><h3>Select a match to start chatting</h3></div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default Chat;import { useState, useEffect, useRef } from 'react';
+import { useSocket } from '../context/SocketContext';
+import API_URL from '../config/api';
+import '../assets/css/chat.css';
+
+function Chat() {
+  const [activeMatch, setActiveMatch] = useState(null);
+  const [messageText, setMessageText] = useState('');
+  const [messages, setMessages] = useState({});
+  const [matches, setMatches] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const messagesEndRef = useRef(null);
+  const socket = useSocket();
+  
+  const token = localStorage.getItem('token');
+
+  // Écouter les événements socket
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleNewMessage = (message) => {
+      console.log('📩 Nouveau message reçu:', message);
+      
+      const otherUserId = message.from_user_id === socket.userId 
+        ? message.to_user_id 
+        : message.from_user_id;
+      
+      setMessages(prev => ({
+        ...prev,
+        [otherUserId]: [...(prev[otherUserId] || []), message]
+      }));
+      
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 100);
+      
+      if (activeMatch?.id === otherUserId) {
+        socket.emit('mark_read', { fromUserId: otherUserId });
+      }
+    };
+
+    const handleUserStatus = (data) => {
+      console.log('🟢 Statut utilisateur changé (chat):', data);
+      
+      setMatches(prev => prev.map(match => 
+        match.id === data.userId 
+          ? { ...match, is_online: data.isOnline }
+          : match
+      ));
+      
+      if (activeMatch && activeMatch.id === data.userId) {
+        setActiveMatch(prev => ({ ...prev, is_online: data.isOnline }));
+      }
+    };
+
+    socket.on('new_message', handleNewMessage);
+    socket.on('user_status', handleUserStatus);
+
+    return () => {
+      socket.off('new_message', handleNewMessage);
+      socket.off('user_status', handleUserStatus);
+    };
+  }, [socket, activeMatch]);
+
+  // Récupérer les matchs
+  useEffect(() => {
+    const fetchMatches = async () => {
+      try {
+        const response = await fetch(`${API_URL}/likes/matches`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          setMatches(data);
+        }
+      } catch (err) {
+        console.error('Erreur récupération matchs:', err);
+      }
+    };
+    
+    if (token) {
+      fetchMatches();
+    }
+  }, [token]);
+
+  // Récupérer les messages d'une conversation
+  const fetchConversation = async (userId) => {
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/messages/${userId}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setMessages(prev => ({
+          ...prev,
+          [userId]: data
+        }));
+      }
+    } catch (err) {
+      console.error('Erreur récupération messages:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Sélectionner un match
+  const selectMatch = async (match) => {
+    setActiveMatch(match);
+    
+    if (!messages[match.id]) {
+      await fetchConversation(match.id);
+    }
+    
+    if (socket) {
+      socket.emit('mark_read', { fromUserId: match.id });
+    }
+  };
+
+  // Envoyer un message
+  const handleSendMessage = async (e) => {
+    e.preventDefault();
+    if (!messageText.trim() || !activeMatch || !socket) return;
+    
+    const newMessage = {
+      toUserId: activeMatch.id,
+      content: messageText
+    };
+    
+    socket.emit('send_message', newMessage, (response) => {
+      if (response && response.success) {
+        setMessages(prev => ({
+          ...prev,
+          [activeMatch.id]: [...(prev[activeMatch.id] || []), response.message]
+        }));
+        
+        setMessageText('');
+        
+        setTimeout(() => {
+          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }, 100);
+      } else if (response && response.error) {
+        console.error('Erreur:', response.error);
+        alert(response.error);
+      }
+    });
+  };
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, activeMatch]);
+
+  const formatTime = (dateStr) => {
+    if (!dateStr) return '';
+    const date = new Date(dateStr);
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
+  const getProfilePhoto = (match) => {
+    if (match.profile_photo) {
+      return `${API_URL.replace('/api', '')}${match.profile_photo}`;
+    }
+    return `https://ui-avatars.com/api/?background=8baa5e&color=fff&rounded=true&name=${encodeURIComponent(match.first_name || match.username || 'User')}`;
+  };
+
+  if (matches.length === 0) {
+    return (
+      <div className="chat-container">
+        <div className="empty-chat">
+          <h3>No matches yet</h3>
+          <p>Start liking profiles to find your coffee partner!</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="chat-container">
+      <div className="chat-sidebar">
+        <div className="chat-sidebar-header">
+          <h2>Your Matches ({matches.length})</h2>
+        </div>
+        <div className="matches-list">
+          {matches.map(match => (
+            <div 
+              key={match.id} 
+              className={`match-item ${activeMatch?.id === match.id ? 'active' : ''}`}
+              onClick={() => selectMatch(match)}
+            >
+              <img 
+                src={getProfilePhoto(match)} 
+                alt={match.username} 
+              />
+              <div className="match-info">
+                <h4>{match.first_name} {match.last_name}</h4>
+                <p>@{match.username}</p>
+                {match.is_online && <span className="online-status">🟢 En ligne</span>}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="chat-main">
+        {activeMatch ? (
+          <>
+            <div className="chat-header">
+              <img 
+                src={getProfilePhoto(activeMatch)} 
+                alt={activeMatch.username} 
+              />
+              <div className="chat-header-info">
+                <h3>{activeMatch.first_name} {activeMatch.last_name}</h3>
+                <p>@{activeMatch.username}</p>
+                {activeMatch.is_online ? (
+                  <span className="online-badge">🟢 En ligne</span>
+                ) : (
+                  <span className="offline-badge">⚪ Hors ligne</span>
+                )}
+              </div>
+            </div>
+            
+            <div className="chat-messages">
+              {loading ? (
+                <div className="loading-messages">Loading messages...</div>
+              ) : (
+                <>
+                  {(messages[activeMatch.id] || []).map((msg, idx) => (
+                    <div 
+                      key={msg.id || idx} 
+                      className={`message-bubble ${msg.from_user_id === activeMatch.id ? 'received' : 'sent'}`}
+                    >
+                      <p>{msg.content}</p>
+                      <span className="message-time">{formatTime(msg.created_at)}</span>
+                    </div>
+                  ))}
+                  <div ref={messagesEndRef} />
+                </>
+              )}
+            </div>
+
+            <form className="chat-input-area" onSubmit={handleSendMessage}>
+              <input 
+                type="text" 
+                placeholder="Type a message..." 
+                value={messageText}
+                onChange={(e) => setMessageText(e.target.value)}
+              />
+              <button type="submit" className="send-btn" disabled={!socket}>
+                Send
+              </button>
+            </form>
+          </>
+        ) : (
+          <div className="empty-chat">
+            <h3>Select a match to start chatting</h3>
+            <p>Brewing connections...</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default Chat;
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+import { calculateAge } from '../utils/age';
+import '../assets/css/login.css';
+import matchaGif from '../assets/images/matcha.gif';
+
+const FORBIDDEN_WORDS = ['password', '123456', 'qwerty', 'admin', 'welcome', 'love', 'coffee'];
+
+function Login() {
+  const [isRegister, setIsRegister] = useState(false);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [registrationSuccess, setRegistrationSuccess] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const [formData, setFormData] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    birthDate: '',
+    username: '',
+    password: '',
+    confirmPassword: ''
+  });
+  
+  const [resetEmail, setResetEmail] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
+
+  const { register, login } = useAuth();
+  const navigate = useNavigate();
+
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
+    setErrorMsg('');
+  };
+
+  const validatePassword = (password) => {
+    if (password.length < 8) return "Password must be at least 8 characters long.";
+    if (!/[A-Z]/.test(password)) return "Password must contain an uppercase letter.";
+    if (!/[0-9]/.test(password)) return "Password must contain a number.";
+    const lowerPass = password.toLowerCase();
+    if (FORBIDDEN_WORDS.some(word => lowerPass.includes(word))) return "Password contains a common or forbidden word.";
+    return null;
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setErrorMsg('');
+    setIsLoading(true);
+
+    if (isRegister) {
+      // 1. Vérification des mots de passe
+      if (formData.password !== formData.confirmPassword) {
+        setErrorMsg("Passwords do not match.");
+        setIsLoading(false);
+        return;
+      }
+
+      // 2. Vérification de l'âge (+18 ans)
+      const userAge = calculateAge(formData.birthDate);
+      if (userAge < 18) {
+        setErrorMsg("You must be at least 18 years old to join Matcha Cafe.");
+        setIsLoading(false);
+        return;
+      }
+
+      // 3. Validation de la robustesse du mot de passe
+      const passError = validatePassword(formData.password);
+      if (passError) {
+        setErrorMsg(passError);
+        setIsLoading(false);
+        return;
+      }
+
+      const result = await register(formData);
+
+      if (result.success) {
+        // SAUVEGARDE LOCALE : On transmet les infos directement aux Settings !
+        localStorage.setItem('mockProfileData', JSON.stringify({
+          firstName: formData.firstName,
+          lastName: formData.lastName,
+          email: formData.email,
+          birthDate: formData.birthDate,
+          gender: '',
+          sexualPreferences: 'bisexual',
+          locationCity: '',
+          bio: ''
+        }));
+        
+        setRegistrationSuccess(true);
+      } else {
+        setErrorMsg(result.error);
+      }
+    } else {
+      if (!formData.username || !formData.password) {
+        setErrorMsg("Please fill in all fields.");
+        setIsLoading(false);
+        return;
+      }
+
+      const result = await login(formData.username, formData.password);
+
+      if (result.success) {
+        navigate('/search');
+      } else {
+        setErrorMsg(result.error);
+      }
+    }
+    setIsLoading(false);
+  };
+
+  // ... (Le reste du code des rendus return() reste identique : mot de passe oublié, succès, etc.)
+  // J'ajoute juste les nouveaux champs dans le rendu du formulaire Register
+
+  return (
+    <div className="auth-container" style={{ backgroundImage: `url(${matchaGif})` }}>
+      <div className="auth-overlay">
+        <div className="auth-card">
+          <h1 className="auth-title">Matcha Cafe</h1>
+          <h2 className="auth-subtitle">{isRegister ? 'Join the Club' : 'Welcome Back'}</h2>
+
+          {errorMsg && <div className="auth-error-box">{errorMsg}</div>}
+
+          <form onSubmit={handleSubmit} className="auth-form">
+            {isRegister && (
+              <>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  <div className="input-group">
+                    <label>First Name</label>
+                    <input type="text" name="firstName" value={formData.firstName} onChange={handleInputChange} required={isRegister} />
+                  </div>
+                  <div className="input-group">
+                    <label>Last Name</label>
+                    <input type="text" name="lastName" value={formData.lastName} onChange={handleInputChange} required={isRegister} />
+                  </div>
+                </div>
+                
+                <div className="input-group">
+                  <label>Email Address</label>
+                  <input type="email" name="email" value={formData.email} onChange={handleInputChange} required={isRegister} />
+                </div>
+
+                <div className="input-group">
+                  <label>Birth Date (18+ Only)</label>
+                  <input type="date" name="birthDate" value={formData.birthDate} onChange={handleInputChange} required={isRegister} />
+                </div>
+              </>
+            )}
+
+            <div className="input-group">
+              <label>Username</label>
+              <input type="text" name="username" value={formData.username} onChange={handleInputChange} required />
+            </div>
+
+            <div className="input-group">
+              <label>Password</label>
+              <input type="password" name="password" value={formData.password} onChange={handleInputChange} required />
+            </div>
+
+            {isRegister && (
+              <div className="input-group">
+                <label>Confirm Password</label>
+                <input type="password" name="confirmPassword" value={formData.confirmPassword} onChange={handleInputChange} required={isRegister} />
+              </div>
+            )}
+
+            <button type="submit" className="auth-submit-btn" disabled={isLoading}>
+              {isLoading ? 'Loading...' : (isRegister ? 'Brew My Account' : 'Login')}
+            </button>
+          </form>
+
+          <div className="auth-toggle-section">
+            <p>
+              {isRegister ? 'Already have a mug?' : "Don't have an account?"}
+              <button type="button" className="auth-toggle-btn" onClick={() => { setIsRegister(!isRegister); setErrorMsg(''); }}>
+                {isRegister ? ' Login here' : ' Register here'}
+              </button>
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default Login;import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+import '../assets/css/login.css';
+import matchaGif from '../assets/images/matcha.gif';
+
+const FORBIDDEN_WORDS = ['password', '123456', 'qwerty', 'admin', 'welcome', 'love', 'coffee'];
+
+function Login() {
+  const [isRegister, setIsRegister] = useState(false);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [registrationSuccess, setRegistrationSuccess] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const [formData, setFormData] = useState({
+    email: '',
+    firstName: '',
+    lastName: '',
+    username: '',
+    password: ''
+  });
+  const [resetEmail, setResetEmail] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
+
+  const { register, login } = useAuth();
+  const navigate = useNavigate();
+
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
+    setErrorMsg('');
+  };
+
+  const validatePassword = (password) => {
+    if (password.length < 8) return "Password must be at least 8 characters long.";
+    if (!/[A-Z]/.test(password)) return "Password must contain an uppercase letter.";
+    if (!/[0-9]/.test(password)) return "Password must contain a number.";
+
+    const lowerPass = password.toLowerCase();
+    const containsForbidden = FORBIDDEN_WORDS.some(word => lowerPass.includes(word));
+    if (containsForbidden) return "Password contains a common or forbidden word.";
+
+    return null;
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setErrorMsg('');
+    setIsLoading(true);
+
+    if (isRegister) {
+      const passError = validatePassword(formData.password);
+      if (passError) {
+        setErrorMsg(passError);
+        setIsLoading(false);
+        return;
+      }
+
+      const result = await register({
+        email: formData.email,
+        username: formData.username,
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+        password: formData.password
+      });
+
+      if (result.success) {
+        setRegistrationSuccess(true);
+      } else {
+        setErrorMsg(result.error);
+      }
+    } else {
+      if (!formData.username || !formData.password) {
+        setErrorMsg("Please fill in all fields.");
+        setIsLoading(false);
+        return;
+      }
+
+      const result = await login(formData.username, formData.password);
+
+      if (result.success) {
+        navigate('/search');
+      } else {
+        setErrorMsg(result.error);
+      }
+    }
+    setIsLoading(false);
+  };
+
+  const handleForgotPasswordSubmit = (e) => {
+    e.preventDefault();
+    if (!resetEmail) {
+      setErrorMsg("Please enter your email.");
+      return;
+    }
+    setResetSent(true);
+    setErrorMsg('');
+  };
+
+  if (registrationSuccess) {
+    return (
+      <div className="auth-container" style={{ backgroundImage: `url(${matchaGif})` }}>
+        <div className="auth-overlay">
+          <div className="auth-card success-card">
+            <h1 className="auth-title">Brewing Complete!</h1>
+            <p className="success-message">
+              Your account has been created. Please check your email ({formData.email}) for a verification link to activate your account.
+            </p>
+            <button className="auth-submit-btn" onClick={() => {
+              setRegistrationSuccess(false);
+              setIsRegister(false);
+            }}>
+              Back to Login
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (showForgotPassword) {
+    return (
+      <div className="auth-container" style={{ backgroundImage: `url(${matchaGif})` }}>
+        <div className="auth-overlay">
+          <div className="auth-card">
+            <h1 className="auth-title">Reset Password</h1>
+
+            {resetSent ? (
+              <div className="success-message">
+                If an account exists for {resetEmail}, a reset link has been sent.
+              </div>
+            ) : (
+              <>
+                <h2 className="auth-subtitle">We'll send you a reset link</h2>
+                {errorMsg && <div className="auth-error-box">{errorMsg}</div>}
+                <form onSubmit={handleForgotPasswordSubmit} className="auth-form">
+                  <div className="input-group">
+                    <label htmlFor="resetEmail">Email</label>
+                    <input
+                      type="email" id="resetEmail" value={resetEmail}
+                      onChange={(e) => setResetEmail(e.target.value)}
+                      placeholder="barista@matcha.com" required
+                    />
+                  </div>
+                  <button type="submit" className="auth-submit-btn">Send Link</button>
+                </form>
+              </>
+            )}
+
+            <div className="auth-toggle-section">
+              <button
+                type="button" className="forgot-password-btn"
+                onClick={() => {
+                  setShowForgotPassword(false);
+                  setResetSent(false);
+                  setErrorMsg('');
+                }}
+              >
+                Back to Login
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="auth-container" style={{ backgroundImage: `url(${matchaGif})` }}>
+      <div className="auth-overlay">
+        <div className="auth-card">
+          <h1 className="auth-title">Matcha Cafe</h1>
+          <h2 className="auth-subtitle">
+            {isRegister ? 'Join the Club' : 'Welcome Back'}
+          </h2>
+
+          {errorMsg && <div className="auth-error-box">{errorMsg}</div>}
+
+          <form onSubmit={handleSubmit} className="auth-form">
+            {isRegister && (
+              <>
+                <div className="input-group">
+                  <label htmlFor="email">Email</label>
+                  <input type="email" id="email" name="email" value={formData.email} onChange={handleInputChange} placeholder="barista@matcha.com" required={isRegister} />
+                </div>
+                <div className="input-group">
+                  <label htmlFor="firstName">First Name</label>
+                  <input type="text" id="firstName" name="firstName" value={formData.firstName} onChange={handleInputChange} placeholder="John" required={isRegister} />
+                </div>
+                <div className="input-group">
+                  <label htmlFor="lastName">Last Name</label>
+                  <input type="text" id="lastName" name="lastName" value={formData.lastName} onChange={handleInputChange} placeholder="Doe" required={isRegister} />
+                </div>
+              </>
+            )}
+
+            <div className="input-group">
+              <label htmlFor="username">Username</label>
+              <input type="text" id="username" name="username" value={formData.username} onChange={handleInputChange} placeholder="CoffeeLover99" required />
+            </div>
+
+            <div className="input-group">
+              <label htmlFor="password">Password</label>
+              <input type="password" id="password" name="password" value={formData.password} onChange={handleInputChange} placeholder="••••••••" required />
+            </div>
+
+            <button type="submit" className="auth-submit-btn" disabled={isLoading}>
+              {isLoading ? 'Loading...' : (isRegister ? 'Brew My Account' : 'Login')}
+            </button>
+          </form>
+
+          <div className="auth-toggle-section">
+            <p>
+              {isRegister ? 'Already have a mug?' : "Don't have an account?"}
+              <button
+                type="button"
+                className="auth-toggle-btn"
+                onClick={() => {
+                  setIsRegister(!isRegister);
+                  setErrorMsg('');
+                }}
+              >
+                {isRegister ? ' Login here' : ' Register here'}
+              </button>
+            </p>
+            {!isRegister && (
+              <button
+                type="button"
+                className="forgot-password-btn"
+                onClick={() => {
+                  setShowForgotPassword(true);
+                  setErrorMsg('');
+                }}
+              >
+                Forgot Password?
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default Login;
+import { useState, useEffect } from 'react';
+import { useAuth } from '../context/AuthContext';
+import '../assets/css/profile.css';
+
+function Profile() {
+  const { user } = useAuth();
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState({ type: '', text: '' });
+  
+  const [profileData, setProfileData] = useState({ 
+    firstName: '', lastName: '', email: '', bio: '', 
+    gender: '', sexualPreferences: 'bisexual', locationCity: '', birthDate: ''
+  });
+  
+  const [tags, setTags] = useState([]);
+  const [tagInput, setTagInput] = useState('');
+  const [profilePhoto, setProfilePhoto] = useState(null);
+
+  useEffect(() => {
+    const savedProfile = localStorage.getItem('mockProfileData');
+    const savedTags = localStorage.getItem('mockProfileTags');
+    const savedPhoto = localStorage.getItem('mockProfilePhoto');
+    
+    if (savedProfile) setProfileData(JSON.parse(savedProfile));
+    if (savedTags) setTags(JSON.parse(savedTags));
+    if (savedPhoto) setProfilePhoto(savedPhoto);
+  }, []);
+
+  const handleInputChange = (e) => setProfileData(prev => ({ ...prev, [e.target.name]: e.target.value }));
+
+  // Tags dynamiques
+  const handleTagKeyDown = (e) => {
+    if (e.key === 'Enter' || e.key === ' ' || e.key === ',') {
+      e.preventDefault();
+      let newTag = tagInput.trim().toLowerCase();
+      if (newTag && !newTag.startsWith('#')) newTag = '#' + newTag;
+      if (newTag.length > 1 && !tags.includes(newTag)) {
+        const updatedTags = [...tags, newTag];
+        setTags(updatedTags);
+        localStorage.setItem('mockProfileTags', JSON.stringify(updatedTags));
+      }
+      setTagInput('');
+    }
+  };
+
+  const removeTag = (idx) => {
+    const newTags = tags.filter((_, i) => i !== idx);
+    setTags(newTags);
+    localStorage.setItem('mockProfileTags', JSON.stringify(newTags));
+  };
+
+  // Photo de profil
+  const handlePhotoChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      if (!file.type.match('image/jpeg') && !file.type.match('image/jpg')) {
+        setMessage({ type: 'error', text: 'Format JPG/JPEG uniquement !' });
+        setTimeout(() => setMessage({ type: '', text: '' }), 4000);
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setProfilePhoto(event.target.result);
+        localStorage.setItem('mockProfilePhoto', event.target.result);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  // GPS
+  const handleGetLocation = () => {
+    if (!("geolocation" in navigator)) return;
+    setLoading(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const lat = position.coords.latitude.toFixed(4);
+        const lon = position.coords.longitude.toFixed(4);
+        setProfileData(prev => ({ ...prev, locationCity: `Paris (GPS: ${lat}, ${lon})` }));
+        setLoading(false);
+      },
+      () => { setLoading(false); }
+    );
+  };
+
+  const handleSaveProfile = (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setTimeout(() => {
+      localStorage.setItem('mockProfileData', JSON.stringify(profileData));
+      setMessage({ type: 'success', text: 'Settings saved successfully!' });
+      setLoading(false);
+      setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+    }, 800);
+  };
+
+  return (
+    <div className="profile-container">
+      <div className="profile-header">
+        <h2>Account Settings</h2>
+        <p>Complete your information to appear in searches.</p>
+      </div>
+
+      {message.text && <div className={`message-banner ${message.type}`}>{message.text}</div>}
+
+      <form onSubmit={handleSaveProfile}>
+        
+        {/* 1. PHOTO DE PROFIL EN PREMIER */}
+        <div className="profile-section" style={{ textAlign: 'center', paddingBottom: '2rem', borderBottom: '1px solid #eee' }}>
+          <h3>Profile Photo</h3>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
+            <div style={{ width: '150px', height: '150px', borderRadius: '50%', border: '4px solid var(--color-matcha)', overflow: 'hidden', backgroundColor: '#eee' }}>
+              <img 
+                src={profilePhoto || 'https://ui-avatars.com/api/?background=eee&color=999&name=Photo'} 
+                alt="Profile Preview" 
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              />
+            </div>
+            <label style={{ cursor: 'pointer', backgroundColor: 'var(--color-sunlight)', padding: '0.5rem 1rem', borderRadius: '20px', fontWeight: 'bold' }}>
+              Upload JPG
+              <input type="file" accept="image/jpeg, image/jpg" onChange={handlePhotoChange} style={{ display: 'none' }} />
+            </label>
+          </div>
+        </div>
+
+        {/* 2. INFOS DE BASE (Pré-remplies par l'inscription) */}
+        <div className="profile-section">
+          <h3>Basic Info</h3>
+          <div className="form-grid">
+            <div className="form-group">
+              <label>First Name</label>
+              <input type="text" name="firstName" value={profileData.firstName} onChange={handleInputChange} required />
+            </div>
+            <div className="form-group">
+              <label>Last Name</label>
+              <input type="text" name="lastName" value={profileData.lastName} onChange={handleInputChange} required />
+            </div>
+            <div className="form-group">
+              <label>Email Address</label>
+              <input type="email" name="email" value={profileData.email} disabled style={{ backgroundColor: '#f5f5f5', color: '#888' }} />
+            </div>
+            <div className="form-group">
+              <label>Birth Date</label>
+              <input type="date" name="birthDate" value={profileData.birthDate} disabled style={{ backgroundColor: '#f5f5f5', color: '#888' }} />
+            </div>
+            <div className="form-group">
+              <label>Your Gender</label>
+              <select name="gender" value={profileData.gender} onChange={handleInputChange} required>
+                <option value="">Select...</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label>Looking for</label>
+              <select name="sexualPreferences" value={profileData.sexualPreferences} onChange={handleInputChange}>
+                <option value="bisexual">Everyone</option>
+                <option value="male">Men</option>
+                <option value="female">Women</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* 3. LOCALISATION */}
+        <div className="profile-section">
+          <h3>Location</h3>
+          <div className="location-container">
+            <button type="button" className="gps-btn" onClick={handleGetLocation}>{loading ? '⏳...' : '📍 Locate me via GPS'}</button>
+            <div className="form-group">
+              <input type="text" name="locationCity" value={profileData.locationCity} onChange={handleInputChange} placeholder="Manual city input" required />
+            </div>
+          </div>
+        </div>
+
+        {/* 4. BIOGRAPHIE (Avec limite de caractères) */}
+        <div className="profile-section">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'end' }}>
+            <h3>Biography</h3>
+            <small style={{ color: profileData.bio.length >= 500 ? 'red' : '#888' }}>
+              {profileData.bio.length} / 500
+            </small>
+          </div>
+          <div className="form-group">
+            <textarea 
+              name="bio" 
+              value={profileData.bio} 
+              onChange={handleInputChange} 
+              rows="4" 
+              maxLength="500"
+              placeholder="Tell us about yourself..." 
+              required
+            />
+          </div>
+        </div>
+
+        {/* 5. TAGS */}
+        <div className="profile-section">
+          <h3>Interests (Tags)</h3>
+          <div className="form-group">
+            <div className="tags-input-container">
+              {tags.map((tag, idx) => (
+                <div key={idx} className="tag-pill">{tag} <button type="button" className="tag-remove" onClick={() => removeTag(idx)}>&times;</button></div>
+              ))}
+              <input 
+                type="text" 
+                value={tagInput} 
+                onChange={(e) => setTagInput(e.target.value)} 
+                onKeyDown={handleTagKeyDown}
+                placeholder={tags.length === 0 ? "Type and press space" : ""}
+                style={{ border: 'none', outline: 'none', flex: 1, minWidth: '150px', padding: '0.5rem', background: 'transparent' }}
+              />
+            </div>
+          </div>
+        </div>
+        
+        <button type="submit" className="save-btn" disabled={loading}>
+          {loading ? 'Saving Changes...' : 'Save Settings'}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+export default Profile;import { useState, useEffect } from 'react';
+import { useAuth } from '../context/AuthContext';
+import { useNavigate } from 'react-router-dom';
+import API_URL from '../config/api';
+import '../assets/css/profile.css';
+
+function Profile() {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const [activeTab, setActiveTab] = useState('edit');
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState({ type: '', text: '' });
+  
+  const [profileData, setProfileData] = useState({ 
+    gender: '', 
+    sexualPreferences: 'bisexual', 
+    bio: '', 
+    locationCity: '',
+    firstName: '',
+    lastName: '',
+    email: '',
+    birthDate: ''
+  });
+  
+  const [tags, setTags] = useState([]);
+  const [availableTags, setAvailableTags] = useState([]);
+  const [selectedTag, setSelectedTag] = useState('');
+  const [photos, setPhotos] = useState([]);
+  const [mainPhotoId, setMainPhotoId] = useState(null);
+  const [viewers, setViewers] = useState([]);
+  const [likers, setLikers] = useState([]);
+  const [showPreview, setShowPreview] = useState(false);
+
+  const token = localStorage.getItem('token');
+
+  const getPhotoUrl = (photo, isExternal) => {
+    if (!photo) return '/default-avatar.png';
+    if (isExternal) return photo;
+    return `${API_URL.replace('/api', '')}${photo}`;
+  };
+
+  const fetchAvailableTags = async () => {
+    try {
+      const response = await fetch(`${API_URL}/tags`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setAvailableTags(data);
+      }
+    } catch (err) {
+      console.error('Erreur chargement tags disponibles:', err);
+    }
+  };
+
+  const fetchProfile = async () => {
+    try {
+      const response = await fetch(`${API_URL}/profile/me`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setProfileData({
+          gender: data.gender || '',
+          sexualPreferences: data.sexual_preferences || 'bisexual',
+          bio: data.bio || '',
+          locationCity: data.location_city || '',
+          firstName: data.first_name || '',
+          lastName: data.last_name || '',
+          email: data.email || '',
+          birthDate: data.birth_date ? data.birth_date.split('T')[0] : ''
+        });
+      }
+    } catch (err) {
+      console.error('Erreur chargement profil:', err);
+    }
+  };
+
+  const fetchUserTags = async () => {
+    try {
+      const response = await fetch(`${API_URL}/tags/me`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setTags(data.map(t => `#${t.name}`));
+      }
+    } catch (err) {
+      console.error('Erreur chargement tags:', err);
+    }
+  };
+
+  const fetchUserPhotos = async () => {
+    try {
+      const response = await fetch(`${API_URL}/photos/me`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setPhotos(data);
+        const profilePhoto = data.find(p => p.is_profile);
+        if (profilePhoto) setMainPhotoId(profilePhoto.id);
+      }
+    } catch (err) {
+      console.error('Erreur chargement photos:', err);
+    }
+  };
+
+  const fetchVisitors = async () => {
+    try {
+      const response = await fetch(`${API_URL}/profile/visitors`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setViewers(data);
+      }
+    } catch (err) {
+      console.error('Erreur chargement visiteurs:', err);
+    }
+  };
+
+  const fetchLikers = async () => {
+    try {
+      const response = await fetch(`${API_URL}/likes/received`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setLikers(data);
+      }
+    } catch (err) {
+      console.error('Erreur chargement likers:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchProfile();
+    fetchUserTags();
+    fetchAvailableTags();
+    fetchUserPhotos();
+    fetchVisitors();
+    fetchLikers();
+  }, []);
+
+  const handleInputChange = (e) => {
+    setProfileData(prev => ({ ...prev, [e.target.name]: e.target.value }));
+  };
+
+  const addTagFromSelect = async () => {
+    if (!selectedTag) return;
+    
+    const tagName = selectedTag;
+    if (tags.includes(`#${tagName}`)) {
+      setMessage({ type: 'error', text: 'Tag déjà ajouté' });
+      setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+      return;
+    }
+    
+    try {
+      const response = await fetch(`${API_URL}/tags/me`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ tagName })
+      });
+      
+      if (response.ok) {
+        setTags([...tags, `#${tagName}`]);
+        setSelectedTag('');
+        setMessage({ type: 'success', text: 'Tag ajouté' });
+      } else {
+        const error = await response.json();
+        setMessage({ type: 'error', text: error.error || 'Erreur' });
+      }
+    } catch (err) {
+      console.error('Erreur ajout tag:', err);
+    }
+    setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+  };
+
+  const removeTag = async (indexToRemove) => {
+    const tagToRemove = tags[indexToRemove].substring(1);
+    try {
+      const response = await fetch(`${API_URL}/tags/me/${tagToRemove}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.ok) {
+        setTags(tags.filter((_, index) => index !== indexToRemove));
+        setMessage({ type: 'success', text: 'Tag supprimé' });
+      }
+    } catch (err) {
+      console.error('Erreur suppression tag:', err);
+    }
+    setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+  };
+
+  const handlePhotoUpload = async (e) => {
+    const files = Array.from(e.target.files);
+    if (photos.length + files.length > 5) {
+      setMessage({ type: 'error', text: 'Maximum 5 photos' });
+      setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+      return;
+    }
+
+    setLoading(true);
+    
+    for (const file of files) {
+      const formData = new FormData();
+      formData.append('photo', file);
+      
+      try {
+        const response = await fetch(`${API_URL}/photos/upload`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` },
+          body: formData
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          setPhotos(prev => [...prev, data.photo]);
+          if (data.photo.is_profile) setMainPhotoId(data.photo.id);
+          setMessage({ type: 'success', text: 'Photo ajoutée' });
+        } else {
+          const error = await response.json();
+          setMessage({ type: 'error', text: error.error });
+        }
+      } catch (err) {
+        console.error('Erreur upload:', err);
+      }
+    }
+    
+    setLoading(false);
+    setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+  };
+
+  const setMainPhoto = async (photoId) => {
+    try {
+      const response = await fetch(`${API_URL}/photos/profile/${photoId}`, {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.ok) {
+        setMainPhotoId(photoId);
+        setPhotos(photos.map(p => ({ ...p, is_profile: p.id === photoId })));
+        setMessage({ type: 'success', text: 'Photo de profil mise à jour' });
+      }
+    } catch (err) {
+      console.error('Erreur mise à jour photo de profil:', err);
+    }
+    setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+  };
+
+  const removePhoto = async (photoId, index) => {
+    try {
+      const response = await fetch(`${API_URL}/photos/${photoId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.ok) {
+        setPhotos(photos.filter((_, i) => i !== index));
+        if (mainPhotoId === photoId) setMainPhotoId(null);
+        setMessage({ type: 'success', text: 'Photo supprimée' });
+      }
+    } catch (err) {
+      console.error('Erreur suppression photo:', err);
+    }
+    setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+  };
+
+  const handleGetLocation = () => {
+    if ("geolocation" in navigator) {
+      setLoading(true);
+      setMessage({ type: 'info', text: '📍 Récupération de votre position...' });
+      
+      navigator.geolocation.getCurrentPosition(
+        async (pos) => {
+          try {
+            const { latitude, longitude } = pos.coords;
+            
+            const geoResponse = await fetch(
+              `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=10&addressdetails=1`
+            );
+            
+            let city = '';
+            if (geoResponse.ok) {
+              const geoData = await geoResponse.json();
+              if (geoData.address) {
+                city = geoData.address.city || 
+                       geoData.address.town || 
+                       geoData.address.village || 
+                       geoData.address.suburb ||
+                       geoData.address.county ||
+                       `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+              } else {
+                city = `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+              }
+            } else {
+              city = `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+            }
+            
+            const gpsResponse = await fetch(`${API_URL}/location/gps`, {
+              method: 'PUT',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({ latitude, longitude, city })
+            });
+            
+            if (!gpsResponse.ok) {
+              throw new Error('Erreur lors de l\'envoi des coordonnées');
+            }
+            
+            setProfileData(prev => ({ ...prev, locationCity: city }));
+            
+            const updateResponse = await fetch(`${API_URL}/profile/me`, {
+              method: 'PUT',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                ...profileData,
+                locationCity: city
+              })
+            });
+            
+            if (updateResponse.ok) {
+              setMessage({ type: 'success', text: `📍 Localisation mise à jour : ${city}` });
+            } else {
+              setMessage({ type: 'success', text: `📍 Position GPS enregistrée : ${city}` });
+            }
+          } catch (err) {
+            console.error('Erreur:', err);
+            setMessage({ type: 'error', text: '❌ Erreur lors de la géolocalisation' });
+          } finally {
+            setLoading(false);
+            setTimeout(() => setMessage({ type: '', text: '' }), 4000);
+          }
+        },
+        (error) => {
+          console.error('Erreur GPS:', error);
+          let errorMsg = '❌ Impossible d\'accéder à votre position.';
+          if (error.code === 1) errorMsg = '❌ Vous avez refusé l\'accès à la géolocalisation.';
+          if (error.code === 2) errorMsg = '❌ Position indisponible.';
+          if (error.code === 3) errorMsg = '❌ Délai d\'attente dépassé.';
+          setMessage({ type: 'error', text: errorMsg });
+          setLoading(false);
+          setTimeout(() => setMessage({ type: '', text: '' }), 4000);
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 0
+        }
+      );
+    } else {
+      setMessage({ type: 'error', text: '❌ La géolocalisation n\'est pas supportée par votre navigateur.' });
+      setTimeout(() => setMessage({ type: '', text: '' }), 4000);
+    }
+  };
+
+  const handleSaveProfile = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    
+    try {
+      const response = await fetch(`${API_URL}/profile/me`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          firstName: profileData.firstName,
+          lastName: profileData.lastName,
+          email: profileData.email,
+          bio: profileData.bio,
+          gender: profileData.gender,
+          sexualPreferences: profileData.sexualPreferences,
+          locationCity: profileData.locationCity,
+          birthDate: profileData.birthDate
+        })
+      });
+      
+      if (response.ok) {
+        setMessage({ type: 'success', text: 'Profile saved!' });
+      } else {
+        const error = await response.json();
+        setMessage({ type: 'error', text: error.error || 'Error saving profile' });
+      }
+    } catch (err) {
+      console.error('Erreur sauvegarde:', err);
+    }
+    
+    setLoading(false);
+    setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+  };
+
+  const formatDate = (dateStr) => {
+    if (!dateStr) return 'Unknown';
+    const date = new Date(dateStr);
+    return date.toLocaleDateString();
+  };
+
+  const PreviewProfile = ({ onClose }) => {
+    const profilePhoto = photos.find(p => p.is_profile);
+    const displayName = user?.username || 'You';
+    
+    const handleOverlayClick = (e) => {
+      if (e.target === e.currentTarget) {
+        onClose();
+      }
+    };
+    
+    return (
+      <div className="preview-overlay" onClick={handleOverlayClick}>
+        <div className="preview-container">
+          <div className="preview-header">
+            <h3>{displayName}</h3>
+            <button className="close-preview" onClick={onClose}>×</button>
+          </div>
+          <div className="preview-content">
+            <div className="preview-photo">
+              <img 
+                src={getPhotoUrl(profilePhoto?.url, profilePhoto?.is_external)} 
+                alt="Profile" 
+              />
+            </div>
+            <div className="preview-info">
+              <h2>{profileData.firstName} {profileData.lastName}</h2>
+              <p className="preview-username">@{user?.username}</p>
+              {profileData.locationCity && <p className="preview-location">📍 {profileData.locationCity}</p>}
+              {profileData.bio && <p className="preview-bio">{profileData.bio}</p>}
+              <div className="preview-tags">
+                {tags.map((tag, i) => <span key={i} className="tag">{tag}</span>)}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="profile-container">
+      <div className="profile-header">
+        <h2>Your Mug (Profile)</h2>
+        <p>Manage your account and see your activity, {user?.username}!</p>
+        <button className="preview-btn" onClick={() => setShowPreview(true)}>
+          See my profile
+        </button>
+      </div>
+
+      {showPreview && <PreviewProfile onClose={() => setShowPreview(false)} />}
+
+      {message.text && (
+        <div className={`message-banner ${message.type}`}>
+          {message.text}
+        </div>
+      )}
+
+      <div className="profile-tabs">
+        <button className={`tab-btn ${activeTab === 'edit' ? 'active' : ''}`} onClick={() => setActiveTab('edit')}>Edit Profile</button>
+        <button className={`tab-btn ${activeTab === 'viewers' ? 'active' : ''}`} onClick={() => setActiveTab('viewers')}>Who Viewed Me?</button>
+        <button className={`tab-btn ${activeTab === 'likers' ? 'active' : ''}`} onClick={() => setActiveTab('likers')}>Who Liked Me?</button>
+      </div>
+
+      {activeTab === 'edit' && (
+        <form onSubmit={handleSaveProfile}>
+          <div className="profile-section">
+            <h3>Basic Info</h3>
+            <div className="form-grid">
+              <div className="form-group">
+                <label>First Name</label>
+                <input type="text" name="firstName" value={profileData.firstName} onChange={handleInputChange} />
+              </div>
+              <div className="form-group">
+                <label>Last Name</label>
+                <input type="text" name="lastName" value={profileData.lastName} onChange={handleInputChange} />
+              </div>
+              <div className="form-group">
+                <label>Email</label>
+                <input type="email" name="email" value={profileData.email} onChange={handleInputChange} />
+              </div>
+              <div className="form-group">
+                <label>Birth Date</label>
+                <input type="date" name="birthDate" value={profileData.birthDate} onChange={handleInputChange} />
+              </div>
+              <div className="form-group">
+                <label>Gender</label>
+                <select name="gender" value={profileData.gender} onChange={handleInputChange}>
+                  <option value="">Select...</option>
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label>Looking for</label>
+                <select name="sexualPreferences" value={profileData.sexualPreferences} onChange={handleInputChange}>
+                  <option value="bisexual">Everyone</option>
+                  <option value="male">Men</option>
+                  <option value="female">Women</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div className="profile-section">
+            <h3>Location</h3>
+            <div className="location-container">
+              <button type="button" className="gps-btn" onClick={handleGetLocation} disabled={loading}>
+                {loading ? '⏳ Localisation en cours...' : '📍 Locate me via GPS'}
+              </button>
+              <div className="form-group">
+                <label>Manual Location (City)</label>
+                <input type="text" name="locationCity" value={profileData.locationCity} onChange={handleInputChange} placeholder="Paris, Lyon, etc." />
+              </div>
+            </div>
+          </div>
+
+          <div className="profile-section">
+            <h3>Biography</h3>
+            <div className="form-group">
+              <textarea name="bio" value={profileData.bio} onChange={handleInputChange} rows="4" placeholder="Tell us about yourself..." />
+            </div>
+          </div>
+
+          <div className="profile-section">
+            <h3>Interests (Tags)</h3>
+            <div className="form-group">
+              <div className="tags-input-container">
+                {tags.map((tag, idx) => (
+                  <div key={idx} className="tag-pill">
+                    {tag}
+                    <button type="button" className="tag-remove" onClick={() => removeTag(idx)}>&times;</button>
+                  </div>
+                ))}
+              </div>
+              <div className="add-tag-select">
+                <select 
+                  value={selectedTag} 
+                  onChange={(e) => setSelectedTag(e.target.value)}
+                >
+                  <option value="">-- Select a tag to add --</option>
+                  {availableTags
+                    .filter(t => !tags.includes(`#${t.name}`))
+                    .map(tag => (
+                      <option key={tag.id} value={tag.name}>#{tag.name}</option>
+                    ))}
+                </select>
+                <button type="button" className="add-tag-btn" onClick={addTagFromSelect}>+ Add Tag</button>
+              </div>
+            </div>
+          </div>
+
+          <div className="profile-section">
+            <h3>Photos ({photos.length}/5)</h3>
+            <div className="form-group">
+              {photos.length < 5 && (
+                <div className="upload-btn-wrapper">
+                  <button type="button" className="upload-btn">➕ Add Photo</button>
+                  <input type="file" accept="image/*" multiple onChange={handlePhotoUpload} disabled={loading} />
+                </div>
+              )}
+              <div className="photos-grid">
+                {photos.map((photo, idx) => (
+                  <div key={photo.id} className={`photo-preview-card ${photo.is_profile ? 'is-main' : ''}`}>
+                    {photo.is_profile && <span className="main-badge">Main</span>}
+                    <img src={getPhotoUrl(photo.url, photo.is_external)} alt="Preview" />
+                    <div className="photo-actions">
+                      {!photo.is_profile && (
+                        <button type="button" className="photo-action-btn" onClick={() => setMainPhoto(photo.id)}>Main</button>
+                      )}
+                      <button type="button" className="photo-action-btn delete" onClick={() => removePhoto(photo.id, idx)}>Delete</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+          
+          <button type="submit" className="save-btn" disabled={loading}>
+            {loading ? 'Saving...' : 'Save Profile'}
+          </button>
+        </form>
+      )}
+
+      {activeTab === 'viewers' && (
+        <div className="history-list">
+          {viewers.length > 0 ? (
+            viewers.map(v => (
+              <div key={v.visitor_id} className="history-item" onClick={() => navigate(`/profile/${v.visitor_id}`)} style={{ cursor: 'pointer' }}>
+                <img src={v.profile_photo || '/default-avatar.png'} alt={v.username} />
+                <div className="history-info">
+                  <h4>{v.first_name} {v.last_name} (@{v.username})</h4>
+                  <p>Viewed your profile on {formatDate(v.viewed_at)}</p>
+                </div>
+              </div>
+            ))
+          ) : (
+            <p className="empty-message">No one has visited your profile yet.</p>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'likers' && (
+        <div className="history-list">
+          {likers.length > 0 ? (
+            likers.map(l => (
+              <div key={l.id} className="history-item" onClick={() => navigate(`/profile/${l.from_user_id}`)} style={{ cursor: 'pointer' }}>
+                <img src={l.profile_photo || '/default-avatar.png'} alt={l.username} />
+                <div className="history-info">
+                  <h4>{l.first_name} {l.last_name} (@{l.username})</h4>
+                  <p>Liked you on {formatDate(l.created_at)}</p>
+                </div>
+              </div>
+            ))
+          ) : (
+            <p className="empty-message">No one has liked you yet.</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default Profile;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+import { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import API_URL from '../config/api';
+import { calculateAge } from '../utils/age';
+import '../assets/css/publicProfile.css';
+
+function PublicProfile() {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [isLikedByMe, setIsLikedByMe] = useState(false);
+  const [isLikedByThem, setIsLikedByThem] = useState(false);
+  const [isBlocked, setIsBlocked] = useState(false);
+  const [photos, setPhotos] = useState([]);
+  const [commonTags, setCommonTags] = useState([]);
+  const [myTags, setMyTags] = useState([]);
+
+  const token = localStorage.getItem('token');
+
+  const getPhotoUrl = (photo, isExternal) => {
+    if (!photo) return '/default-avatar.png';
+    if (isExternal) return photo;
+    return `${API_URL.replace('/api', '')}${photo}`;
+  };
+
+  // Récupérer mes tags
+  const fetchMyTags = async () => {
+    try {
+      const response = await fetch(`${API_URL}/tags/me`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setMyTags(data.map(t => `#${t.name}`));
+      }
+    } catch (err) {
+      console.error('Erreur récupération mes tags:', err);
+    }
+  };
+
+  // Récupérer le profil public
+  const fetchUserProfile = async () => {
+    try {
+      const response = await fetch(`${API_URL}/profile/${id}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.status === 404) {
+        navigate('/search');
+        return;
+      }
+      
+      if (response.ok) {
+        const data = await response.json();
+        setUser(data);
+        
+        if (data.tags && myTags.length > 0) {
+          const common = data.tags.filter(tag => myTags.includes(tag));
+          setCommonTags(common);
+        }
+      } else {
+        navigate('/search');
+      }
+    } catch (err) {
+      console.error('Erreur récupération profil:', err);
+      navigate('/search');
+    }
+  };
+
+  // Récupérer les photos
+  const fetchUserPhotos = async () => {
+    try {
+      const response = await fetch(`${API_URL}/photos/user/${id}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setPhotos(data);
+      }
+    } catch (err) {
+      console.error('Erreur récupération photos:', err);
+    }
+  };
+
+  // Vérifier si j'ai liké ce profil
+  const checkLikeStatus = async () => {
+    try {
+      const response = await fetch(`${API_URL}/likes/check/${id}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setIsLikedByMe(data.liked);
+      }
+    } catch (err) {
+      console.error('Erreur vérification like:', err);
+    }
+  };
+
+  // Vérifier si ce profil m'a liké
+  const checkIfLikedByThem = async () => {
+    try {
+      const response = await fetch(`${API_URL}/likes/received`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        const likedByThem = data.some(like => like.from_user_id === parseInt(id));
+        setIsLikedByThem(likedByThem);
+      }
+    } catch (err) {
+      console.error('Erreur vérification like reçu:', err);
+    }
+  };
+
+  // Vérifier si bloqué
+  const checkBlockStatus = async () => {
+    try {
+      const response = await fetch(`${API_URL}/blocks/check/${id}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.blocked) {
+          setIsBlocked(true);
+          navigate('/search');
+        }
+      }
+    } catch (err) {
+      console.error('Erreur vérification blocage:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchMyTags();
+  }, []);
+
+  useEffect(() => {
+    if (id && token) {
+      fetchUserProfile();
+      checkLikeStatus();
+      checkIfLikedByThem();
+      checkBlockStatus();
+    }
+  }, [id, token]);
+
+  useEffect(() => {
+    if (user) {
+      fetchUserPhotos();
+      setLoading(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (user?.tags && myTags.length > 0) {
+      const common = user.tags.filter(tag => myTags.includes(tag));
+      setCommonTags(common);
+    }
+  }, [user?.tags, myTags]);
+
+  const handleLikeToggle = async () => {
+    try {
+      if (isLikedByMe) {
+        const response = await fetch(`${API_URL}/likes/${id}`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (response.ok) {
+          setIsLikedByMe(false);
+        }
+      } else {
+        const response = await fetch(`${API_URL}/likes/${id}`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          setIsLikedByMe(true);
+          if (data.match) {
+            alert(`❤️ C'est un match ! Vous pouvez maintenant discuter avec ${user.first_name}`);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Erreur like/unlike:', err);
+    }
+  };
+
+  const handleBlock = async () => {
+    try {
+      const response = await fetch(`${API_URL}/blocks/${id}`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.ok) {
+        setIsBlocked(true);
+        alert('Utilisateur bloqué. Il n\'apparaîtra plus dans vos recherches.');
+        navigate('/search');
+      }
+    } catch (err) {
+      console.error('Erreur blocage:', err);
+    }
+  };
+
+  const handleReport = () => {
+    alert('Utilisateur signalé aux modérateurs.');
+  };
+
+  const formatLastSeen = (lastSeen) => {
+    if (!lastSeen) return 'Récemment';
+    const date = new Date(lastSeen);
+    const now = new Date();
+    const diff = Math.floor((now - date) / 1000 / 60);
+    
+    if (diff < 1) return 'À l\'instant';
+    if (diff < 60) return `Il y a ${diff} min`;
+    if (diff < 1440) return `Il y a ${Math.floor(diff / 60)}h`;
+    return `Il y a ${Math.floor(diff / 1440)}j`;
+  };
+
+  if (loading) {
+    return (
+      <div className="public-profile-container">
+        <div style={{ textAlign: 'center', padding: '3rem' }}>
+          Chargement du profil...
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="public-profile-container">
+        <div style={{ textAlign: 'center', padding: '3rem' }}>
+          Profil non trouvé
+        </div>
+      </div>
+    );
+  }
+
+  const age = calculateAge(user.birth_date);
+  const profilePhoto = photos.find(p => p.is_profile);
+  const otherPhotos = photos.filter(p => !p.is_profile);
+
+  return (
+    <div className="public-profile-container">
+      <div className="profile-header-main">
+        <div className="profile-name-area">
+          <h2>
+            {user.first_name} {user.last_name} ({age || '?'})
+            <span className="fame-badge">🔥 {user.popularity_score || 0} Fame</span>
+          </h2>
+          <p>@{user.username}</p>
+          {user.is_online ? (
+            <p className="status-text status-online">🟢 En ligne</p>
+          ) : (
+            <p className="status-text status-offline">⚪ Dernière visite: {formatLastSeen(user.last_seen)}</p>
+          )}
+        </div>
+      </div>
+
+      <div className="interaction-bar">
+        {isLikedByThem && <div className="like-status-badge">✨ Cette personne vous a liké !</div>}
+        
+        <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+          <button 
+            className={`action-btn ${isLikedByMe ? 'btn-unlike' : 'btn-like'}`} 
+            onClick={handleLikeToggle}
+          >
+            {isLikedByMe ? '💔 Unlike' : '❤️ Like'}
+          </button>
+          
+          {isLikedByMe && isLikedByThem && (
+            <button 
+              className="action-btn btn-chat"
+              onClick={() => navigate('/chat')}
+            >
+              💬 Envoyer un message
+            </button>
+          )}
+        </div>
+
+        <div className="danger-actions">
+          <button className="action-btn btn-danger" onClick={handleReport}>🚩 Signaler</button>
+          <button className="action-btn btn-danger" onClick={handleBlock}>🚫 Bloquer</button>
+        </div>
+      </div>
+
+      <div className="public-photos">
+        {profilePhoto ? (
+          <img src={getPhotoUrl(profilePhoto.url, profilePhoto.is_external)} alt="Photo de profil" />
+        ) : (
+          <div className="no-photo">Aucune photo de profil</div>
+        )}
+      </div>
+
+      {otherPhotos.length > 0 && (
+        <div className="other-photos">
+          <h3>📸 Autres photos</h3>
+          <div className="photos-grid">
+            {otherPhotos.map(photo => (
+              <img 
+                key={photo.id} 
+                src={getPhotoUrl(photo.url, photo.is_external)} 
+                alt="Photo"
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="info-block">
+        <h3>📍 Localisation</h3>
+        {user.location_city ? (
+          <p>{user.location_city}</p>
+        ) : user.latitude && user.longitude ? (
+          <p>Coordonnées GPS: {user.latitude.toFixed(4)}, {user.longitude.toFixed(4)}</p>
+        ) : (
+          <p>Non renseignée</p>
+        )}
+        {user.location_manual && <small>(Localisation manuelle)</small>}
+        {!user.location_manual && (user.latitude || user.longitude) && <small>(GPS)</small>}
+      </div>
+
+      <div className="info-block">
+        <h3>📖 Biographie</h3>
+        <p>{user.bio || 'Aucune biographie pour le moment.'}</p>
+      </div>
+
+      <div className="info-block">
+        <h3>🏷️ Centres d'intérêt</h3>
+        <div className="tags-container">
+          {user.tags && user.tags.length > 0 ? (
+            user.tags.map((tag, idx) => (
+              <span 
+                key={idx} 
+                className={`tag ${commonTags.includes(tag) ? 'common-tag' : ''}`}
+              >
+                {tag}
+                {commonTags.includes(tag) && ' ✓'}
+              </span>
+            ))
+          ) : (
+            <p>Aucun centre d'intérêt renseigné</p>
+          )}
+        </div>
+        {commonTags.length > 0 && (
+          <p className="common-tags-message">
+            🎯 Vous avez {commonTags.length} centre(s) d'intérêt en commun !
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default PublicProfile;
+import { useState, useMemo } from "react";
+import UserCard from "../components/UserCard";
+import { calculateAge } from "../utils/age";
+import mockUsers from "../mocks/users.json";
+import "../assets/css/search.css";
+
+function Search() {
+  const [ageMin, setAgeMin] = useState(18);
+  const [ageMax, setAgeMax] = useState(100);
+  const [minFame, setMinFame] = useState(0);
+  const [locationFilter, setLocationFilter] = useState("");
+  const [sortBy, setSortBy] = useState("match");
+
+  const users = mockUsers;
+  const userTags = ["#coffee"]; // Tags simulés de l'utilisateur courant
+
+  const filteredAndSortedUsers = useMemo(() => {
+    let result = [...users];
+
+    if (ageMin || ageMax) {
+      result = result.filter((u) => {
+        const userAge = calculateAge(u.birth_date) || 25;
+        return userAge >= ageMin && userAge <= ageMax;
+      });
+    }
+
+    if (minFame > 0) result = result.filter((u) => (u.popularity_score || 0) >= minFame);
+    
+    if (locationFilter) {
+      result = result.filter((u) => u.location_city?.toLowerCase().includes(locationFilter.toLowerCase()));
+    }
+
+    result.sort((a, b) => {
+      switch (sortBy) {
+        case "age": return (calculateAge(a.birth_date) || 25) - (calculateAge(b.birth_date) || 25);
+        case "fame": return (b.popularity_score || 0) - (a.popularity_score || 0);
+        default: return (b.popularity_score || 0) - (a.popularity_score || 0);
+      }
+    });
+
+    return result;
+  }, [ageMin, ageMax, minFame, locationFilter, sortBy]);
+
+  return (
+    <div className="search-container">
+      <aside className="search-filters">
+        <h2>Filters</h2>
+        <div className="filter-group">
+          <label>Age Gap ({ageMin} - {ageMax})</label>
+          <div className="range-inputs">
+            <input type="number" value={ageMin} onChange={(e) => setAgeMin(Number(e.target.value))} min="18" max="100"/>
+            <span>-</span>
+            <input type="number" value={ageMax} onChange={(e) => setAgeMax(Number(e.target.value))} min="18" max="100"/>
+          </div>
+        </div>
+        <div className="filter-group">
+          <label>Min Popularity: {minFame}</label>
+          <input type="range" min="0" max="100" value={minFame} onChange={(e) => setMinFame(Number(e.target.value))} className="slider"/>
+        </div>
+        <div className="filter-group">
+          <label>Location</label>
+          <input type="text" placeholder="City" value={locationFilter} onChange={(e) => setLocationFilter(e.target.value)}/>
+        </div>
+      </aside>
+
+      <section className="search-results">
+        <div className="results-header">
+          <h2>Suggested Matches</h2>
+          <select className="sort-select" value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+            <option value="match">Best Match</option>
+            <option value="age">Age (Youngest)</option>
+            <option value="fame">Popularity</option>
+          </select>
+        </div>
+
+        <div className="users-grid">
+          {filteredAndSortedUsers.length > 0 ? (
+            filteredAndSortedUsers.map((u) => <UserCard key={u.id} user={u} currentUserTags={userTags} />)
+          ) : (
+            <div style={{ gridColumn: "1 / -1", textAlign: "center", padding: "3rem" }}>
+              <h3>No coffee lovers found with these filters.</h3>
+            </div>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+export default Search;import { useState, useEffect, useMemo } from "react";
+import { useAuth } from "../context/AuthContext";
+import UserCard from "../components/UserCard";
+import API_URL from "../config/api";
+import { calculateAge } from "../utils/age";
+import "../assets/css/search.css";
+
+function Search() {
+  const { user } = useAuth();
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [availableTags, setAvailableTags] = useState([]);
+  const [userTags, setUserTags] = useState([]);
+
+  const [ageMin, setAgeMin] = useState(18);
+  const [ageMax, setAgeMax] = useState(100);
+  const [minFame, setMinFame] = useState(0);
+  const [locationFilter, setLocationFilter] = useState("");
+  const [selectedTags, setSelectedTags] = useState([]);
+  const [tagDropdownOpen, setTagDropdownOpen] = useState(false);
+  const [sortBy, setSortBy] = useState("match");
+
+  // Récupérer les suggestions du backend
+  const fetchSuggestions = async () => {
+    try {
+      setLoading(true);
+      const token = localStorage.getItem("token");
+
+      const response = await fetch(`${API_URL}/search/suggestions?limit=50`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!response.ok) {
+        throw new Error("Erreur lors de la récupération des suggestions");
+      }
+
+      const data = await response.json();
+      setUsers(data.suggestions || []);
+    } catch (err) {
+      console.error("Erreur:", err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Récupérer les tags disponibles
+  const fetchAvailableTags = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(`${API_URL}/tags`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setAvailableTags(data);
+      }
+    } catch (err) {
+      console.error("Erreur récupération tags disponibles:", err);
+    }
+  };
+
+  // Récupérer les tags de l'utilisateur courant
+  const fetchUserTags = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(`${API_URL}/tags/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (response.ok) {
+        const tags = await response.json();
+        setUserTags(tags.map((t) => `#${t.name}`));
+      }
+    } catch (err) {
+      console.error("Erreur récupération tags:", err);
+    }
+  };
+
+  useEffect(() => {
+    fetchSuggestions();
+    fetchAvailableTags();
+    fetchUserTags();
+  }, []);
+
+  const toggleTag = (tagName) => {
+    setSelectedTags((prev) =>
+      prev.includes(tagName)
+        ? prev.filter((t) => t !== tagName)
+        : [...prev, tagName],
+    );
+  };
+
+  // Filtrer et trier les utilisateurs
+  const filteredAndSortedUsers = useMemo(() => {
+    let result = [...users];
+
+    // Filtre par âge
+    if (ageMin || ageMax) {
+      result = result.filter((u) => {
+        if (!u.birth_date) return true;
+        const userAge = calculateAge(u.birth_date);
+        if (!userAge) return true;
+        const isValidMin = !ageMin || userAge >= ageMin;
+        const isValidMax = !ageMax || userAge <= ageMax;
+        return isValidMin && isValidMax;
+      });
+    }
+
+    // Filtre par popularité
+    if (minFame > 0) {
+      result = result.filter((u) => (u.popularity_score || 0) >= minFame);
+    }
+
+    // Filtre par localisation
+    if (locationFilter) {
+      result = result.filter((u) =>
+        u.location_city?.toLowerCase().includes(locationFilter.toLowerCase()),
+      );
+    }
+
+    // Filtre par tags (sélection multiple)
+    if (selectedTags.length > 0) {
+      result = result.filter(
+        (u) => u.tags && selectedTags.some((tag) => u.tags.includes(tag)),
+      );
+    }
+
+    // Calculer le nombre de tags communs
+    const getCommonTagsCount = (userTagsList) => {
+      if (!userTagsList || !userTags) return 0;
+      return userTagsList.filter((tag) => userTags.includes(tag)).length;
+    };
+
+    // Tri
+    result.sort((a, b) => {
+      switch (sortBy) {
+        case "age":
+          const ageA = a.birth_date ? calculateAge(a.birth_date) : 0;
+          const ageB = b.birth_date ? calculateAge(b.birth_date) : 0;
+          return ageA - ageB;
+        case "fame":
+          return (b.popularity_score || 0) - (a.popularity_score || 0);
+        case "location":
+          return (a.location_city || "").localeCompare(b.location_city || "");
+        case "tags":
+          return getCommonTagsCount(b.tags) - getCommonTagsCount(a.tags);
+        case "match":
+        default:
+          const scoreA =
+            (a.popularity_score || 0) + getCommonTagsCount(a.tags) * 10;
+          const scoreB =
+            (b.popularity_score || 0) + getCommonTagsCount(b.tags) * 10;
+          return scoreB - scoreA;
+      }
+    });
+
+    return result;
+  }, [
+    users,
+    ageMin,
+    ageMax,
+    minFame,
+    locationFilter,
+    selectedTags,
+    sortBy,
+    userTags,
+  ]);
+
+  if (loading) {
+    return (
+      <div className="search-container">
+        <div className="loading-spinner">Loading coffee lovers...</div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="search-container">
+        <div className="error-message">Error: {error}</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="search-container">
+      <aside className="search-filters">
+        <h2>Filters</h2>
+
+        <div className="filter-group">
+          <label>
+            Age Gap ({ageMin} - {ageMax})
+          </label>
+          <div className="range-inputs">
+            <input
+              type="number"
+              value={ageMin}
+              onChange={(e) => setAgeMin(Number(e.target.value))}
+              min="18"
+              max="100"
+            />
+            <span>-</span>
+            <input
+              type="number"
+              value={ageMax}
+              onChange={(e) => setAgeMax(Number(e.target.value))}
+              min="18"
+              max="100"
+            />
+          </div>
+        </div>
+
+        <div className="filter-group">
+          <label>Min Popularity: {minFame}</label>
+          <input
+            type="range"
+            min="0"
+            max="100"
+            value={minFame}
+            onChange={(e) => setMinFame(Number(e.target.value))}
+            className="slider"
+          />
+        </div>
+
+        <div className="filter-group">
+          <label>Location</label>
+          <input
+            type="text"
+            placeholder="City"
+            value={locationFilter}
+            onChange={(e) => setLocationFilter(e.target.value)}
+          />
+        </div>
+
+        <div className="filter-group">
+          <label>Tags</label>
+          <div className="tags-dropdown-container">
+            <div
+              className="tags-dropdown-trigger"
+              onClick={() => setTagDropdownOpen(!tagDropdownOpen)}
+            >
+              {selectedTags.length > 0 ? (
+                <span>{selectedTags.length} tag(s) selected</span>
+              ) : (
+                <span>-- Select tags --</span>
+              )}
+              <span className="dropdown-arrow">
+                {tagDropdownOpen ? "▲" : "▼"}
+              </span>
+            </div>
+            {tagDropdownOpen && (
+              <div className="tags-dropdown-menu">
+                {availableTags.map((tag) => (
+                  <label key={tag.id} className="tag-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={selectedTags.includes(`#${tag.name}`)}
+                      onChange={() => toggleTag(`#${tag.name}`)}
+                    />
+                    <span className="tag-name">#{tag.name}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Afficher les tags sélectionnés */}
+          {selectedTags.length > 0 && (
+            <div className="selected-tags-container">
+              {selectedTags.map((tag) => (
+                <span key={tag} className="selected-tag">
+                  {tag}
+                  <button
+                    type="button"
+                    className="remove-tag"
+                    onClick={() => toggleTag(tag)}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      </aside>
+
+      <section className="search-results">
+        <div className="results-header">
+          <h2>Suggested Matches</h2>
+          <select
+            className="sort-select"
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value)}
+          >
+            <option value="match">Best Match</option>
+            <option value="age">Age (Youngest)</option>
+            <option value="location">Location (A-Z)</option>
+            <option value="fame">Popularity</option>
+            <option value="tags">Common Tags</option>
+          </select>
+        </div>
+
+        <div className="users-grid">
+          {filteredAndSortedUsers.length > 0 ? (
+            filteredAndSortedUsers.map((u) => (
+              <UserCard key={u.id} user={u} currentUserTags={userTags} />
+            ))
+          ) : (
+            <div
+              style={{
+                gridColumn: "1 / -1",
+                textAlign: "center",
+                padding: "3rem",
+                color: "#666",
+              }}
+            >
+              <h3>No coffee lovers found with these exact filters.</h3>
+              <p>Try widening your search criteria!</p>
+            </div>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+export default Search;
+// Calculer l'âge à partir de birth_date
+export const calculateAge = (birthDate) => {
+  if (!birthDate) return null;
+  const today = new Date();
+  const birth = new Date(birthDate);
+  let age = today.getFullYear() - birth.getFullYear();
+  const m = today.getMonth() - birth.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) {
+    age--;
+  }
+  return age;
+};

@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { calculateAge } from '../utils/age';
 import '../assets/css/login.css';
 import matchaGif from '../assets/images/matcha.gif';
 
@@ -13,17 +12,14 @@ function Login() {
   const [registrationSuccess, setRegistrationSuccess] = useState(false);
   const [resetSent, setResetSent] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  
+
   const [formData, setFormData] = useState({
+    email: '',
     firstName: '',
     lastName: '',
-    email: '',
-    birthDate: '',
     username: '',
-    password: '',
-    confirmPassword: ''
+    password: ''
   });
-  
   const [resetEmail, setResetEmail] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -40,8 +36,11 @@ function Login() {
     if (password.length < 8) return "Password must be at least 8 characters long.";
     if (!/[A-Z]/.test(password)) return "Password must contain an uppercase letter.";
     if (!/[0-9]/.test(password)) return "Password must contain a number.";
+
     const lowerPass = password.toLowerCase();
-    if (FORBIDDEN_WORDS.some(word => lowerPass.includes(word))) return "Password contains a common or forbidden word.";
+    const containsForbidden = FORBIDDEN_WORDS.some(word => lowerPass.includes(word));
+    if (containsForbidden) return "Password contains a common or forbidden word.";
+
     return null;
   };
 
@@ -51,19 +50,6 @@ function Login() {
     setIsLoading(true);
 
     if (isRegister) {
-      if (formData.password !== formData.confirmPassword) {
-        setErrorMsg("Passwords do not match.");
-        setIsLoading(false);
-        return;
-      }
-
-      const userAge = calculateAge(formData.birthDate);
-      if (userAge < 18) {
-        setErrorMsg("You must be at least 18 years old to join Matcha Cafe.");
-        setIsLoading(false);
-        return;
-      }
-
       const passError = validatePassword(formData.password);
       if (passError) {
         setErrorMsg(passError);
@@ -71,19 +57,15 @@ function Login() {
         return;
       }
 
-      const result = await register(formData);
-      
+      const result = await register({
+        email: formData.email,
+        username: formData.username,
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+        password: formData.password
+      });
+
       if (result.success) {
-        localStorage.setItem('mockProfileData', JSON.stringify({
-          firstName: formData.firstName,
-          lastName: formData.lastName,
-          email: formData.email,
-          birthDate: formData.birthDate,
-          gender: '',
-          sexualPreferences: 'bisexual',
-          locationCity: '',
-          bio: ''
-        }));
         setRegistrationSuccess(true);
       } else {
         setErrorMsg(result.error);
@@ -96,6 +78,7 @@ function Login() {
       }
 
       const result = await login(formData.username, formData.password);
+
       if (result.success) {
         navigate('/search');
       } else {
@@ -142,6 +125,7 @@ function Login() {
         <div className="auth-overlay">
           <div className="auth-card">
             <h1 className="auth-title">Reset Password</h1>
+
             {resetSent ? (
               <div className="success-message">
                 If an account exists for {resetEmail}, a reset link has been sent.
@@ -153,14 +137,26 @@ function Login() {
                 <form onSubmit={handleForgotPasswordSubmit} className="auth-form">
                   <div className="input-group">
                     <label htmlFor="resetEmail">Email</label>
-                    <input type="email" id="resetEmail" value={resetEmail} onChange={(e) => setResetEmail(e.target.value)} placeholder="barista@matcha.com" required />
+                    <input
+                      type="email" id="resetEmail" value={resetEmail}
+                      onChange={(e) => setResetEmail(e.target.value)}
+                      placeholder="barista@matcha.com" required
+                    />
                   </div>
                   <button type="submit" className="auth-submit-btn">Send Link</button>
                 </form>
               </>
             )}
+
             <div className="auth-toggle-section">
-              <button type="button" className="forgot-password-btn" onClick={() => { setShowForgotPassword(false); setResetSent(false); setErrorMsg(''); }}>
+              <button
+                type="button" className="forgot-password-btn"
+                onClick={() => {
+                  setShowForgotPassword(false);
+                  setResetSent(false);
+                  setErrorMsg('');
+                }}
+              >
                 Back to Login
               </button>
             </div>
@@ -175,53 +171,39 @@ function Login() {
       <div className="auth-overlay">
         <div className="auth-card">
           <h1 className="auth-title">Matcha Cafe</h1>
-          <h2 className="auth-subtitle">{isRegister ? 'Join the Club' : 'Welcome Back'}</h2>
+          <h2 className="auth-subtitle">
+            {isRegister ? 'Join the Club' : 'Welcome Back'}
+          </h2>
 
           {errorMsg && <div className="auth-error-box">{errorMsg}</div>}
 
           <form onSubmit={handleSubmit} className="auth-form">
             {isRegister && (
               <>
-                {/* Remplacement du style en ligne par la classe name-grid */}
-                <div className="name-grid">
-                  <div className="input-group">
-                    <label>First Name</label>
-                    <input type="text" name="firstName" value={formData.firstName} onChange={handleInputChange} required={isRegister} />
-                  </div>
-                  <div className="input-group">
-                    <label>Last Name</label>
-                    <input type="text" name="lastName" value={formData.lastName} onChange={handleInputChange} required={isRegister} />
-                  </div>
-                </div>
-                
                 <div className="input-group">
-                  <label>Email Address</label>
-                  <input type="email" name="email" value={formData.email} onChange={handleInputChange} required={isRegister} />
+                  <label htmlFor="email">Email</label>
+                  <input type="email" id="email" name="email" value={formData.email} onChange={handleInputChange} placeholder="barista@matcha.com" required={isRegister} />
                 </div>
-
                 <div className="input-group">
-                  <label>Birth Date (18+ Only)</label>
-                  <input type="date" name="birthDate" value={formData.birthDate} onChange={handleInputChange} required={isRegister} />
+                  <label htmlFor="firstName">First Name</label>
+                  <input type="text" id="firstName" name="firstName" value={formData.firstName} onChange={handleInputChange} placeholder="John" required={isRegister} />
+                </div>
+                <div className="input-group">
+                  <label htmlFor="lastName">Last Name</label>
+                  <input type="text" id="lastName" name="lastName" value={formData.lastName} onChange={handleInputChange} placeholder="Doe" required={isRegister} />
                 </div>
               </>
             )}
 
             <div className="input-group">
-              <label>Username</label>
-              <input type="text" name="username" value={formData.username} onChange={handleInputChange} required />
+              <label htmlFor="username">Username</label>
+              <input type="text" id="username" name="username" value={formData.username} onChange={handleInputChange} placeholder="CoffeeLover99" required />
             </div>
 
             <div className="input-group">
-              <label>Password</label>
-              <input type="password" name="password" value={formData.password} onChange={handleInputChange} required />
+              <label htmlFor="password">Password</label>
+              <input type="password" id="password" name="password" value={formData.password} onChange={handleInputChange} placeholder="••••••••" required />
             </div>
-
-            {isRegister && (
-              <div className="input-group">
-                <label>Confirm Password</label>
-                <input type="password" name="confirmPassword" value={formData.confirmPassword} onChange={handleInputChange} required={isRegister} />
-              </div>
-            )}
 
             <button type="submit" className="auth-submit-btn" disabled={isLoading}>
               {isLoading ? 'Loading...' : (isRegister ? 'Brew My Account' : 'Login')}
@@ -231,12 +213,26 @@ function Login() {
           <div className="auth-toggle-section">
             <p>
               {isRegister ? 'Already have a mug?' : "Don't have an account?"}
-              <button type="button" className="auth-toggle-btn" onClick={() => { setIsRegister(!isRegister); setErrorMsg(''); }}>
+              <button
+                type="button"
+                className="auth-toggle-btn"
+                onClick={() => {
+                  setIsRegister(!isRegister);
+                  setErrorMsg('');
+                }}
+              >
                 {isRegister ? ' Login here' : ' Register here'}
               </button>
             </p>
             {!isRegister && (
-              <button type="button" className="forgot-password-btn" onClick={() => { setShowForgotPassword(true); setErrorMsg(''); }}>
+              <button
+                type="button"
+                className="forgot-password-btn"
+                onClick={() => {
+                  setShowForgotPassword(true);
+                  setErrorMsg('');
+                }}
+              >
                 Forgot Password?
               </button>
             )}

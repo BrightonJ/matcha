@@ -155,3 +155,16 @@
   border: 1px solid #86efac;
   line-height: 1.5;
 }
+
+.name-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+/* On screens smaller than 480px, stack them vertically */
+@media (max-width: 480px) {
+  .name-grid {
+    grid-template-columns: 1fr;
+  }
+}
