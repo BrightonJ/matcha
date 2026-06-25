@@ -1,123 +1,93 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import API_URL from '../config/api';
 import { calculateAge } from '../utils/age';
-import mockUsers from '../mocks/users.json';
 import '../assets/css/publicProfile.css';
 
-function PublicProfile() {
+function PublicProfileProd() {
   const { id } = useParams();
   const navigate = useNavigate();
   
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isLikedByMe, setIsLikedByMe] = useState(false);
-  const [isLikedByThem, setIsLikedByThem] = useState(false);
-  const [commonTags, setCommonTags] = useState([]);
+  const token = localStorage.getItem('token');
+
+  const getPhotoUrl = (photoUrl, isExternal) => {
+    if (!photoUrl) return `https://ui-avatars.com/api/?background=8baa5e&color=fff&size=300&name=${user?.username || 'User'}`;
+    if (isExternal) return photoUrl;
+    return `${API_URL.replace('/api', '')}${photoUrl}`;
+  };
 
   useEffect(() => {
-    setTimeout(() => {
-      const foundUser = mockUsers.find(u => u.id === parseInt(id));
+    fetch(`${API_URL}/profile/${id}`, { headers: { 'Authorization': `Bearer ${token}` } })
+      .then(res => {
+        if (!res.ok) throw new Error("Profil introuvable");
+        return res.json();
+      })
+      .then(data => {
+        setUser(data);
+        setLoading(false);
+      })
+      .catch(() => navigate('/search'));
+
+    // Vérifier si je l'ai déjà liké
+    fetch(`${API_URL}/likes/check/${id}`, { headers: { 'Authorization': `Bearer ${token}` } })
+      .then(res => res.json())
+      .then(data => setIsLikedByMe(data.liked))
+      .catch(err => console.error(err));
+  }, [id, token, navigate]);
+
+  const handleLikeToggle = async () => {
+    try {
+      const method = isLikedByMe ? 'DELETE' : 'POST';
+      const response = await fetch(`${API_URL}/likes/${id}`, {
+        method,
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
+      });
       
-      if (!foundUser) {
-        navigate('/search');
-        return;
+      if (response.ok) {
+        setIsLikedByMe(!isLikedByMe);
+        const data = await response.json();
+        if (data.match) alert(`🎉 C'est un match avec ${user.first_name} !`);
       }
-
-      setUser(foundUser);
-
-      console.log(`[Mock API] Visite enregistrée pour le profil ID: ${foundUser.id}`);
-
-      const myTags = JSON.parse(localStorage.getItem('mockProfileTags') || '[]');
-      if (foundUser.tags && myTags.length > 0) {
-        const common = foundUser.tags.filter(tag => myTags.includes(tag));
-        setCommonTags(common);
-      }
-
-      if (foundUser.id % 2 === 0) setIsLikedByThem(true);
-
-      setLoading(false);
-    }, 400);
-  }, [id, navigate]);
-
-  const handleLikeToggle = () => {
-    if (isLikedByMe) {
-      setIsLikedByMe(false);
-      alert(`💔 Vous avez retiré votre like pour ${user.first_name}.`);
-    } else {
-      setIsLikedByMe(true);
-      if (isLikedByThem) {
-        alert(`🎉 C'est un match ! Vous pouvez maintenant discuter avec ${user.first_name}`);
-      } else {
-        alert(`❤️ Vous avez liké ${user.first_name} !`);
-      }
+    } catch (err) {
+      alert("Erreur lors du like.");
     }
   };
 
-  const handleBlock = () => {
-    alert('🚫 Utilisateur bloqué. Il n\'apparaîtra plus dans vos recherches.');
+  const handleBlock = async () => {
+    await fetch(`${API_URL}/blocks/${id}`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
+    alert('🚫 Utilisateur bloqué.');
     navigate('/search');
   };
 
-  const handleReport = () => {
-    alert('🚩 Faux compte signalé aux modérateurs.');
+  const handleReport = async () => {
+    await fetch(`${API_URL}/profile/report/${id}`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
+    alert('🚩 Profil signalé.');
   };
 
-  const formatLastSeen = (dateString) => {
-    if (!dateString) return "Inconnue";
-    const date = new Date(dateString);
-    return date.toLocaleString('fr-FR', {
-      day: '2-digit', month: '2-digit', year: 'numeric',
-      hour: '2-digit', minute: '2-digit'
-    });
-  };
-
-  if (loading) {
-    return (
-      <div className="public-profile-container">
-        <div style={{ textAlign: 'center', padding: '3rem', color: '#666' }}>
-          Recherche du profil en cours...
-        </div>
-      </div>
-    );
-  }
-
+  if (loading) return <div className="public-profile-container" style={{ textAlign: 'center', padding: '3rem' }}>Recherche du profil en cours...</div>;
   if (!user) return null;
 
-  const age = calculateAge(user.birth_date) || 25;
-  const profilePhoto = `https://ui-avatars.com/api/?background=8baa5e&color=fff&size=300&name=${user.username}`;
+  const age = calculateAge(user.birth_date);
 
   return (
     <div className="public-profile-container">
       <div className="profile-header-main">
         <div className="profile-name-area">
-          <h2>
-            {user.first_name} {user.last_name} ({age})
-            <span className="fame-badge">🔥 {user.popularity_score || 0} Fame</span>
-          </h2>
+          <h2>{user.first_name} {user.last_name} ({age}) <span className="fame-badge">🔥 {user.popularity_score || 0} Fame</span></h2>
           <p>@{user.username}</p>
-          {user.is_online ? (
-            <p className="status-text status-online">🟢 En ligne</p>
-          ) : (
-            <p className="status-text status-offline">⚪ Dernière visite : {formatLastSeen(user.last_connection)}</p>
-          )}
+          {user.is_online ? <p className="status-text status-online">🟢 En ligne</p> : <p className="status-text status-offline">⚪ Hors ligne</p>}
         </div>
       </div>
 
       <div className="interaction-bar">
-        {isLikedByThem && <div className="like-status-badge">✨ Cette personne vous a liké !</div>}
-        
         <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
           <button className={`action-btn ${isLikedByMe ? 'btn-unlike' : 'btn-like'}`} onClick={handleLikeToggle}>
             {isLikedByMe ? '💔 Unlike' : '❤️ Like'}
           </button>
-          
-          {isLikedByMe && isLikedByThem && (
-            <button className="action-btn btn-chat" onClick={() => navigate('/chat')}>
-              💬 Envoyer un message
-            </button>
-          )}
         </div>
-
         <div className="danger-actions">
           <button className="action-btn btn-danger" onClick={handleReport}>🚩 Signaler</button>
           <button className="action-btn btn-danger" onClick={handleBlock}>🚫 Bloquer</button>
@@ -125,7 +95,7 @@ function PublicProfile() {
       </div>
 
       <div className="public-photos" style={{ textAlign: 'center' }}>
-         <img src={profilePhoto} alt="Photo de profil" style={{ width: '100%', maxWidth: '300px', borderRadius: '50%', border: '4px solid var(--color-sunlight)' }} />
+         <img src={getPhotoUrl(user.profile_photo, user.photo_is_external)} alt="Profil" style={{ width: '100%', maxWidth: '300px', borderRadius: '50%', border: '4px solid var(--color-sunlight)', objectFit: 'cover', aspectRatio: '1/1' }} />
       </div>
 
       <div className="info-block">
@@ -135,28 +105,10 @@ function PublicProfile() {
 
       <div className="info-block">
         <h3>📖 Biographie</h3>
-        <p>{user.bio || "Aucune biographie pour le moment. Cette personne préfère garder le mystère..."}</p>
-      </div>
-
-      <div className="info-block">
-        <h3>🏷️ Centres d'intérêt</h3>
-        <div className="tags-container">
-          {user.tags && user.tags.length > 0 ? (
-            user.tags.map((tag, idx) => (
-              <span key={idx} className={`tag ${commonTags.includes(tag) ? 'common-tag' : ''}`}>
-                {tag} {commonTags.includes(tag) && ' ✓'}
-              </span>
-            ))
-          ) : (
-            <p>Aucun centre d'intérêt renseigné</p>
-          )}
-        </div>
-        {commonTags.length > 0 && (
-          <p className="common-tags-message">🎯 Vous avez {commonTags.length} centre(s) d'intérêt en commun !</p>
-        )}
+        <p>{user.bio || "Cette personne préfère garder le mystère..."}</p>
       </div>
     </div>
   );
 }
 
-export default PublicProfile;
+export default PublicProfileProd;

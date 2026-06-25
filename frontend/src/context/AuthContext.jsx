@@ -1,42 +1,81 @@
-import { createContext, useState, useContext, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect } from 'react';
+import API_URL from '../config/api';
 
-export const AuthContext = createContext(null);
+const AuthContext = createContext();
+
+export const useAuth = () => useContext(AuthContext);
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Vérifier si un faux token existe au chargement
-    const token = localStorage.getItem('token');
-    if (token) {
-      setUser({ id: 99, username: 'MockUser', first_name: 'Test', last_name: 'Local' });
-    }
-    setLoading(false);
+    const checkLoggedIn = async () => {
+      const token = localStorage.getItem('token');
+      if (token) {
+        try {
+          const response = await fetch(`${API_URL}/profile/me`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (response.ok) {
+            const userData = await response.json();
+            setUser(userData);
+            setIsAuthenticated(true);
+          } else {
+            logout();
+          }
+        } catch (error) {
+          logout();
+        }
+      }
+      setLoading(false);
+    };
+    checkLoggedIn();
   }, []);
+
+  const login = async (username, password) => {
+    try {
+      const response = await fetch(`${API_URL}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Erreur');
+      localStorage.setItem('token', data.token);
+      setUser(data.user);
+      setIsAuthenticated(true);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  };
+
+  const register = async (userData) => {
+    try {
+      const response = await fetch(`${API_URL}/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(userData)
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Erreur');
+      return { success: true, message: data.message };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  };
 
   const logout = () => {
     localStorage.removeItem('token');
     setUser(null);
-  };
-
-  const register = async (userData) => {
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    return { success: true, message: "Inscription simulée avec succès !" };
-  };
-
-  const login = async (username, password) => {
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    localStorage.setItem('token', 'fake-jwt-token');
-    setUser({ id: 99, username: username, first_name: username, last_name: 'Mock' });
-    return { success: true };
+    setIsAuthenticated(false);
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, register, login, logout }}>
+    <AuthContext.Provider value={{ user, isAuthenticated, loading, login, register, logout }}>
       {children}
     </AuthContext.Provider>
   );
 };
-
-export const useAuth = () => useContext(AuthContext);

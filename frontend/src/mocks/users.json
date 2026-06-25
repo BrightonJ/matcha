@@ -1,8 +1,0 @@
-[
-  { "id": 1, "username": "LatteArtKing", "first_name": "Julien", "last_name": "Dubois", "gender": "male", "sexual_preferences": "female", "birth_date": "1995-05-15", "popularity_score": 85, "location_city": "Paris", "tags": ["#coffee", "#art", "#vegan"], "is_online": true },
-  { "id": 2, "username": "MatchaQueen", "first_name": "Sarah", "last_name": "Martin", "gender": "female", "sexual_preferences": "bisexual", "birth_date": "1999-10-22", "popularity_score": 92, "location_city": "Lyon", "tags": ["#matcha", "#geek", "#piercing"], "is_online": false, "last_connection": "2026-06-15T10:15:00Z" },
-  { "id": 3, "username": "EspressoShot", "first_name": "Marc", "last_name": "Lefebvre", "gender": "male", "sexual_preferences": "male", "birth_date": "1990-03-10", "popularity_score": 45, "location_city": "Marseille", "tags": ["#sport", "#coffee", "#travel"], "is_online": true },
-  { "id": 4, "username": "TeaLover", "first_name": "Emma", "last_name": "Bernard", "gender": "female", "sexual_preferences": "male", "birth_date": "1994-08-05", "popularity_score": 78, "location_city": "Paris", "tags": ["#tea", "#books", "#vegan"], "is_online": true },
-  { "id": 5, "username": "CodeBreaker", "first_name": "Alex", "last_name": "Roux", "gender": "male", "sexual_preferences": "bisexual", "birth_date": "1992-11-30", "popularity_score": 60, "location_city": "Bordeaux", "tags": ["#geek", "#code", "#coffee"], "is_online": false, "last_connection": "2026-06-14T22:45:00Z" },
-  { "id": 6, "username": "YogaZen", "first_name": "Chloe", "last_name": "Petit", "gender": "female", "sexual_preferences": "female", "birth_date": "1996-02-14", "popularity_score": 88, "location_city": "Paris", "tags": ["#yoga", "#vegan", "#piercing"], "is_online": true }
-]

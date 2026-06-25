@@ -1,20 +1,105 @@
-import { createContext, useState, useContext } from 'react';
+import { createContext, useState, useContext, useEffect } from 'react';
+import { useSocket } from './SocketContext';
+import API_URL from '../config/api';
 
 export const NotificationContext = createContext(null);
 
 export const NotificationProvider = ({ children }) => {
-  const [notifications, setNotifications] = useState([
-    { id: 1, content: 'MatchaQueen a visité votre profil', is_read: false, created_at: new Date(), type: 'visit' }
-  ]);
+  const [notifications, setNotifications] = useState([]);
   const [toastMessage, setToastMessage] = useState(null);
-  const [loading] = useState(false);
-  
+  const [loading, setLoading] = useState(true);
+  const socket = useSocket();
+
+  const token = localStorage.getItem('token');
   const unreadCount = notifications.filter(n => !n.is_read).length;
 
-  const markAsRead = (id) => setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
-  const markAllAsRead = () => setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
-  const deleteNotification = (id) => setNotifications(prev => prev.filter(n => n.id !== id));
-  
+  // Écouter les notifications via socket
+  useEffect(() => {
+    if (!socket) return;
+
+    socket.on('notification', (notification) => {
+      console.log('🔔 Nouvelle notification reçue:', notification);
+      setNotifications(prev => [notification, ...prev]);
+      setToastMessage(notification.content);
+      setTimeout(() => setToastMessage(null), 4000);
+    });
+
+    return () => {
+      socket.off('notification');
+    };
+  }, [socket]);
+
+  // Récupérer les notifications existantes
+  const fetchNotifications = async () => {
+    if (!token) return;
+    
+    try {
+      const response = await fetch(`${API_URL}/notifications`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setNotifications(data);
+      }
+    } catch (err) {
+      console.error('Erreur récupération notifications:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchNotifications();
+  }, [token]);
+
+  const markAsRead = async (notificationId) => {
+    try {
+      const response = await fetch(`${API_URL}/notifications/${notificationId}/read`, {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.ok) {
+        setNotifications(prev => 
+          prev.map(n => n.id === notificationId ? { ...n, is_read: true } : n)
+        );
+      }
+    } catch (err) {
+      console.error('Erreur marquage lu:', err);
+    }
+  };
+
+  const markAllAsRead = async () => {
+    try {
+      const response = await fetch(`${API_URL}/notifications/read-all`, {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.ok) {
+        setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
+      }
+    } catch (err) {
+      console.error('Erreur marquage tout lu:', err);
+    }
+  };
+
+  const deleteNotification = async (notificationId) => {
+    try {
+      const response = await fetch(`${API_URL}/notifications/${notificationId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.ok) {
+        setNotifications(prev => prev.filter(n => n.id !== notificationId));
+      }
+    } catch (err) {
+      console.error('Erreur suppression notification:', err);
+    }
+  };
+
   const triggerToast = (message) => {
     setToastMessage(message);
     setTimeout(() => setToastMessage(null), 4000);
@@ -22,8 +107,15 @@ export const NotificationProvider = ({ children }) => {
 
   return (
     <NotificationContext.Provider value={{ 
-      notifications, unreadCount, loading, markAsRead, markAllAsRead, 
-      deleteNotification, triggerToast, toastMessage, refreshNotifications: () => {}
+      notifications, 
+      unreadCount,
+      loading,
+      markAsRead, 
+      markAllAsRead,
+      deleteNotification,
+      triggerToast, 
+      toastMessage,
+      refreshNotifications: fetchNotifications
     }}>
       {children}
     </NotificationContext.Provider>

@@ -1,247 +1,169 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { calculateAge } from '../utils/age';
 import '../assets/css/login.css';
-import matchaGif from '../assets/images/matcha.gif';
-
-const FORBIDDEN_WORDS = ['password', '123456', 'qwerty', 'admin', 'welcome', 'love', 'coffee'];
 
 function Login() {
-  const [isRegister, setIsRegister] = useState(false);
-  const [showForgotPassword, setShowForgotPassword] = useState(false);
-  const [registrationSuccess, setRegistrationSuccess] = useState(false);
-  const [resetSent, setResetSent] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  
+  const [isLogin, setIsLogin] = useState(true);
   const [formData, setFormData] = useState({
-    firstName: '',
-    lastName: '',
-    email: '',
-    birthDate: '',
     username: '',
     password: '',
-    confirmPassword: ''
+    confirmPassword: '',
+    email: '',
+    firstName: '',
+    lastName: ''
   });
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const [loading, setLoading] = useState(false);
   
-  const [resetEmail, setResetEmail] = useState('');
-  const [errorMsg, setErrorMsg] = useState('');
-
-  const { register, login } = useAuth();
+  const { login, register } = useAuth();
   const navigate = useNavigate();
 
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
-    setErrorMsg('');
+  const handleChange = (e) => {
+    setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
-  const validatePassword = (password) => {
-    if (password.length < 8) return "Password must be at least 8 characters long.";
-    if (!/[A-Z]/.test(password)) return "Password must contain an uppercase letter.";
-    if (!/[0-9]/.test(password)) return "Password must contain a number.";
-    const lowerPass = password.toLowerCase();
-    if (FORBIDDEN_WORDS.some(word => lowerPass.includes(word))) return "Password contains a common or forbidden word.";
-    return null;
+  const validatePassword = (pwd) => {
+    const forbiddenWords = ['password', 'coffee', 'love', '123456', 'azerty', 'qwerty'];
+    const lowerPwd = pwd.toLowerCase();
+    if (forbiddenWords.some(word => lowerPwd.includes(word))) return false;
+    const regex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[a-zA-Z\d\W]{8,}$/;
+    return regex.test(pwd);
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setErrorMsg('');
-    setIsLoading(true);
+    setError('');
+    setMessage('');
+    setLoading(true);
 
-    if (isRegister) {
-      if (formData.password !== formData.confirmPassword) {
-        setErrorMsg("Passwords do not match.");
-        setIsLoading(false);
-        return;
-      }
-
-      const userAge = calculateAge(formData.birthDate);
-      if (userAge < 18) {
-        setErrorMsg("You must be at least 18 years old to join Matcha Cafe.");
-        setIsLoading(false);
-        return;
-      }
-
-      const passError = validatePassword(formData.password);
-      if (passError) {
-        setErrorMsg(passError);
-        setIsLoading(false);
-        return;
-      }
-
-      const result = await register(formData);
-      
-      if (result.success) {
-        localStorage.setItem('mockProfileData', JSON.stringify({
-          firstName: formData.firstName,
-          lastName: formData.lastName,
-          email: formData.email,
-          birthDate: formData.birthDate,
-          gender: '',
-          sexualPreferences: 'bisexual',
-          locationCity: '',
-          bio: ''
-        }));
-        setRegistrationSuccess(true);
-      } else {
-        setErrorMsg(result.error);
-      }
-    } else {
-      if (!formData.username || !formData.password) {
-        setErrorMsg("Please fill in all fields.");
-        setIsLoading(false);
-        return;
-      }
-
+    if (isLogin) {
       const result = await login(formData.username, formData.password);
       if (result.success) {
         navigate('/search');
       } else {
-        setErrorMsg(result.error);
+        setError(result.error);
+      }
+    } else {
+      if (formData.password !== formData.confirmPassword) {
+        setError('Les deux mots de passe ne sont pas identiques.');
+        setLoading(false);
+        return;
+      }
+      if (!validatePassword(formData.password)) {
+        setError('Le mot de passe doit contenir au moins 8 caractères, une majuscule, un chiffre, et aucun mot commun.');
+        setLoading(false);
+        return;
+      }
+      const result = await register({
+        username: formData.username,
+        password: formData.password,
+        email: formData.email,
+        firstName: formData.firstName,
+        lastName: formData.lastName
+      });
+      if (result.success) {
+        setMessage(result.message || 'Inscription réussie. Veuillez vérifier votre email.');
+        setIsLogin(true);
+        setFormData({
+          username: '',
+          password: '',
+          confirmPassword: '',
+          email: '',
+          firstName: '',
+          lastName: ''
+        });
+      } else {
+        setError(result.error);
       }
     }
-    setIsLoading(false);
+    setLoading(false);
   };
-
-  const handleForgotPasswordSubmit = (e) => {
-    e.preventDefault();
-    if (!resetEmail) {
-      setErrorMsg("Please enter your email.");
-      return;
-    }
-    setResetSent(true);
-    setErrorMsg('');
-  };
-
-  if (registrationSuccess) {
-    return (
-      <div className="auth-container" style={{ backgroundImage: `url(${matchaGif})` }}>
-        <div className="auth-overlay">
-          <div className="auth-card success-card">
-            <h1 className="auth-title">Brewing Complete!</h1>
-            <p className="success-message">
-              Your account has been created. Please check your email ({formData.email}) for a verification link to activate your account.
-            </p>
-            <button className="auth-submit-btn" onClick={() => {
-              setRegistrationSuccess(false);
-              setIsRegister(false);
-            }}>
-              Back to Login
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (showForgotPassword) {
-    return (
-      <div className="auth-container" style={{ backgroundImage: `url(${matchaGif})` }}>
-        <div className="auth-overlay">
-          <div className="auth-card">
-            <h1 className="auth-title">Reset Password</h1>
-            {resetSent ? (
-              <div className="success-message">
-                If an account exists for {resetEmail}, a reset link has been sent.
-              </div>
-            ) : (
-              <>
-                <h2 className="auth-subtitle">We'll send you a reset link</h2>
-                {errorMsg && <div className="auth-error-box">{errorMsg}</div>}
-                <form onSubmit={handleForgotPasswordSubmit} className="auth-form">
-                  <div className="input-group">
-                    <label htmlFor="resetEmail">Email</label>
-                    <input type="email" id="resetEmail" value={resetEmail} onChange={(e) => setResetEmail(e.target.value)} placeholder="barista@matcha.com" required />
-                  </div>
-                  <button type="submit" className="auth-submit-btn">Send Link</button>
-                </form>
-              </>
-            )}
-            <div className="auth-toggle-section">
-              <button type="button" className="forgot-password-btn" onClick={() => { setShowForgotPassword(false); setResetSent(false); setErrorMsg(''); }}>
-                Back to Login
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
-    <div className="auth-container" style={{ backgroundImage: `url(${matchaGif})` }}>
-      <div className="auth-overlay">
-        <div className="auth-card">
-          <h1 className="auth-title">Matcha Cafe</h1>
-          <h2 className="auth-subtitle">{isRegister ? 'Join the Club' : 'Welcome Back'}</h2>
+    <div className="login-container">
+      <div className="login-card">
+        <h1>Matcha</h1>
+        <h2>{isLogin ? 'Connexion' : 'Inscription'}</h2>
+        
+        {error && <div className="error-message">{error}</div>}
+        {message && <div className="success-message">{message}</div>}
 
-          {errorMsg && <div className="auth-error-box">{errorMsg}</div>}
-
-          <form onSubmit={handleSubmit} className="auth-form">
-            {isRegister && (
-              <>
-                {/* Remplacement du style en ligne par la classe name-grid */}
-                <div className="name-grid">
-                  <div className="input-group">
-                    <label>First Name</label>
-                    <input type="text" name="firstName" value={formData.firstName} onChange={handleInputChange} required={isRegister} />
-                  </div>
-                  <div className="input-group">
-                    <label>Last Name</label>
-                    <input type="text" name="lastName" value={formData.lastName} onChange={handleInputChange} required={isRegister} />
-                  </div>
-                </div>
-                
-                <div className="input-group">
-                  <label>Email Address</label>
-                  <input type="email" name="email" value={formData.email} onChange={handleInputChange} required={isRegister} />
-                </div>
-
-                <div className="input-group">
-                  <label>Birth Date (18+ Only)</label>
-                  <input type="date" name="birthDate" value={formData.birthDate} onChange={handleInputChange} required={isRegister} />
-                </div>
-              </>
-            )}
-
-            <div className="input-group">
-              <label>Username</label>
-              <input type="text" name="username" value={formData.username} onChange={handleInputChange} required />
+        <form onSubmit={handleSubmit}>
+          {!isLogin && (
+            <div className="name-grid">
+              <input
+                type="text"
+                name="firstName"
+                placeholder="Prénom"
+                value={formData.firstName}
+                onChange={handleChange}
+                required
+              />
+              <input
+                type="text"
+                name="lastName"
+                placeholder="Nom"
+                value={formData.lastName}
+                onChange={handleChange}
+                required
+              />
             </div>
+          )}
+          
+          {!isLogin && (
+            <input
+              type="email"
+              name="email"
+              placeholder="Email"
+              value={formData.email}
+              onChange={handleChange}
+              required
+            />
+          )}
 
-            <div className="input-group">
-              <label>Password</label>
-              <input type="password" name="password" value={formData.password} onChange={handleInputChange} required />
-            </div>
+          <input
+            type="text"
+            name="username"
+            placeholder="Nom d'utilisateur"
+            value={formData.username}
+            onChange={handleChange}
+            required
+          />
+          
+          <input
+            type="password"
+            name="password"
+            placeholder="Mot de passe"
+            value={formData.password}
+            onChange={handleChange}
+            required
+          />
 
-            {isRegister && (
-              <div className="input-group">
-                <label>Confirm Password</label>
-                <input type="password" name="confirmPassword" value={formData.confirmPassword} onChange={handleInputChange} required={isRegister} />
-              </div>
-            )}
+          {!isLogin && (
+            <input
+              type="password"
+              name="confirmPassword"
+              placeholder="Confirmer le mot de passe"
+              value={formData.confirmPassword}
+              onChange={handleChange}
+              required
+            />
+          )}
 
-            <button type="submit" className="auth-submit-btn" disabled={isLoading}>
-              {isLoading ? 'Loading...' : (isRegister ? 'Brew My Account' : 'Login')}
-            </button>
-          </form>
+          <button type="submit" disabled={loading}>
+            {loading ? 'Chargement...' : (isLogin ? 'Se connecter' : 'S\'inscrire')}
+          </button>
+        </form>
 
-          <div className="auth-toggle-section">
-            <p>
-              {isRegister ? 'Already have a mug?' : "Don't have an account?"}
-              <button type="button" className="auth-toggle-btn" onClick={() => { setIsRegister(!isRegister); setErrorMsg(''); }}>
-                {isRegister ? ' Login here' : ' Register here'}
-              </button>
-            </p>
-            {!isRegister && (
-              <button type="button" className="forgot-password-btn" onClick={() => { setShowForgotPassword(true); setErrorMsg(''); }}>
-                Forgot Password?
-              </button>
-            )}
-          </div>
-        </div>
+        <p className="toggle-auth" onClick={() => {
+          setIsLogin(!isLogin);
+          setError('');
+          setMessage('');
+        }}>
+          {isLogin ? "Pas encore de compte ? S'inscrire" : "Déjà un compte ? Se connecter"}
+        </p>
       </div>
     </div>
   );

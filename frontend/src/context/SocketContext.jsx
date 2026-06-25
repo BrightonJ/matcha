@@ -1,26 +1,33 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useEffect, useState } from 'react';
+import { io } from 'socket.io-client';
+import { useAuth } from './AuthContext';
+import API_URL from '../config/api';
 
-const SocketContext = createContext(null);
+const SocketContext = createContext();
+
 export const useSocket = () => useContext(SocketContext);
 
 export const SocketProvider = ({ children }) => {
   const [socket, setSocket] = useState(null);
+  const { isAuthenticated } = useAuth();
+  const baseUrl = API_URL.replace('/api', '');
 
   useEffect(() => {
-    // On crée un faux objet socket qui ne fait rien mais empêche les crashs
-    const dummySocket = {
-      on: (event, callback) => console.log(`Socket simulé écoute: ${event}`),
-      off: (event) => console.log(`Socket simulé arrête d'écouter: ${event}`),
-      emit: (event, data, callback) => {
-        console.log(`Socket simulé émet: ${event}`, data);
-        if (callback) callback({ success: true, message: { content: data.content || 'Message simulé', created_at: new Date() }});
-      },
-      disconnect: () => console.log('Socket simulé déconnecté'),
-      userId: 99
-    };
-    
-    setSocket(dummySocket);
-  }, []);
+    if (isAuthenticated) {
+      const token = localStorage.getItem('token'); // Modifié ici
+      const newSocket = io(baseUrl, {
+        auth: { token },
+        reconnection: true
+      });
+
+      setSocket(newSocket);
+
+      return () => newSocket.close();
+    } else {
+      if (socket) socket.close();
+      setSocket(null);
+    }
+  }, [isAuthenticated]);
 
   return (
     <SocketContext.Provider value={socket}>
