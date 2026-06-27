@@ -20,7 +20,6 @@ help:
 	@echo ""
 	@echo "  $(GREEN)make run$(NC)           - 🚀 TOUT EN UN : Docker + install + init-db + seed + serveurs"
 	@echo "  $(GREEN)make docker-up$(NC)     - 🐳 Démarrer PostgreSQL avec Docker"
-	@echo "  $(GREEN)make docker-down$(NC)   - 🐳 Arrêter PostgreSQL"
 	@echo "  $(GREEN)make docker-clean$(NC)  - 🐳 Supprimer les données PostgreSQL"
 	@echo "  $(GREEN)make install$(NC)       - Installer les dépendances"
 	@echo "  $(GREEN)make backend$(NC)       - Lancer le backend (port 3000)"
@@ -30,17 +29,7 @@ help:
 	@echo "  $(GREEN)make clean$(NC)         - Supprimer node_modules"
 	@echo "  $(GREEN)make fclean$(NC)        - Supprimer node_modules + uploads + Docker"
 	@echo "  $(GREEN)make re$(NC)            - Nettoyage complet + réinstallation + init-db + seed"
-	@echo "  $(GREEN)make check$(NC)         - Vérifier les prérequis"
-	@echo "  $(GREEN)make kill$(NC)          - Tuer les processus sur les ports 3000 et 5173"
 	@echo ""
-
-# Vérifier les prérequis
-check:
-	@echo "$(BLUE)🔍 Vérification des prérequis...$(NC)"
-	@command -v node >/dev/null 2>&1 || (echo "$(RED)❌ Node.js non trouvé$(NC)" && exit 1)
-	@command -v npm >/dev/null 2>&1 || (echo "$(RED)❌ npm non trouvé$(NC)" && exit 1)
-	@command -v docker >/dev/null 2>&1 || (echo "$(YELLOW)⚠️  Docker non trouvé (optionnel)$(NC)")
-	@echo "$(GREEN)✅ Prérequis vérifiés$(NC)"
 
 # ==================== DOCKER ====================
 
@@ -52,13 +41,7 @@ docker-up:
 	@echo "$(GREEN)✅ PostgreSQL démarré sur le port 5432$(NC)"
 	@echo "$(YELLOW)💡 Utilisateur: postgres, Mot de passe: postgres$(NC)"
 
-# Arrêter PostgreSQL avec Docker
-docker-down:
-	@echo "$(BLUE)🐳 Arrêt de PostgreSQL...$(NC)"
-	@docker-compose -f $(COMPOSE_FILE) down 2>/dev/null || true
-	@echo "$(GREEN)✅ PostgreSQL arrêté$(NC)"
-
-# Supprimer les données PostgreSQL
+# Arrêter PostgreSQL et Supprimer les données PostgreSQL
 docker-clean:
 	@echo "$(BLUE)🐳 Suppression des données PostgreSQL...$(NC)"
 	@docker-compose -f $(COMPOSE_FILE) down -v 2>/dev/null || true
@@ -119,7 +102,7 @@ clean:
 	@echo "$(GREEN)✅ Nettoyage terminé$(NC)"
 
 # Nettoyage complet (y compris uploads ET Docker)
-fclean: clean docker-down
+fclean: clean docker-clean
 	@echo "$(BLUE)🧹 Suppression des uploads...$(NC)"
 	@rm -rf $(BACKEND_DIR)/uploads
 	@echo "$(GREEN)✅ Nettoyage complet terminé$(NC)"
@@ -129,13 +112,4 @@ re: fclean install init-db seed
 	@echo "$(GREEN)✅ Rebuild complet terminé$(NC)"
 	@echo "$(YELLOW)💡 Lance 'make run' pour démarrer les serveurs$(NC)"
 
-# ==================== UTILITAIRES ====================
-
-# Tuer les processus sur les ports 3000 et 5173
-kill:
-	@echo "$(BLUE)🔪 Arrêt des processus sur les ports 3000 et 5173...$(NC)"
-	@lsof -ti :3000 | xargs kill -9 2>/dev/null || true
-	@lsof -ti :5173 | xargs kill -9 2>/dev/null || true
-	@echo "$(GREEN)✅ Ports libérés$(NC)"
-
-.PHONY: help check docker-up docker-down docker-clean install init-db seed backend frontend run clean fclean re kill
+.PHONY: help docker-up docker-clean install init-db seed backend frontend run clean fclean re
