@@ -30,8 +30,26 @@ app.use(cors({
   credentials: true
 }));
 
-// Servir les fichiers statiques (uploads)
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+// Configurer CORS pour autoriser localhost ET 127.0.0.1
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  process.env.FRONTEND_URL
+].filter(Boolean);
+
+app.use(cors({
+  origin: function(origin, callback) {
+    // Permettre les requêtes sans origin (curl, postman)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.log('❌ Origin bloqué par CORS:', origin);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true
+}));
 
 // Routes
 app.use("/api/auth", authRoutes);

@@ -37,13 +37,14 @@ npm install
 ### 3. Configurer les variables d'environnement
 
 Crée un fichier .env à la racine :
+
 ```env
 PORT=3000
 
-# Base de données
+# Base de données (Docker)
 DB_USER=postgres
-DB_PASSWORD=votre_mot_de_passe
-DB_HOST=localhost
+DB_PASSWORD=postgres
+DB_HOST=postgres
 DB_PORT=5432
 DB_NAME=matcha
 
@@ -64,6 +65,7 @@ FRONTEND_URL=http://localhost:5173
 ```bash
 npm run init-db
 ```
+
 ### 5. Démarrer le serveur
 
 ```bash
@@ -92,132 +94,131 @@ backend/
 
 ### Authentification
 
-| Méthode       | Endpoint    | Description |
-|---------------|-------------|-------------|
-| POST | /api/auth/register | Inscription |
-| POST | /api/auth/login | Connexion |
-| GET  | /api/auth/verify/:token | Vérification email |
+| Méthode | Endpoint                | Description        |
+| ------- | ----------------------- | ------------------ |
+| POST    | /api/auth/register      | Inscription        |
+| POST    | /api/auth/login         | Connexion          |
+| GET     | /api/auth/verify/:token | Vérification email |
 
 ### Profil
 
-| Méthode       | Endpoint    | Description |
-|---------------|-------------|-------------|
-| GET | /api/profile/me | Mon profil |
-| PUT | /api/profile/me | Modifier mon profil |
-| GET  | /api/profile/:id | Profil d'un utilisateur |
-| GET  | /api/profile/visitors | Mes visiteurs |
+| Méthode | Endpoint              | Description             |
+| ------- | --------------------- | ----------------------- |
+| GET     | /api/profile/me       | Mon profil              |
+| PUT     | /api/profile/me       | Modifier mon profil     |
+| GET     | /api/profile/:id      | Profil d'un utilisateur |
+| GET     | /api/profile/visitors | Mes visiteurs           |
 
 ### Tags
 
-| Méthode       | Endpoint    | Description |
-|---------------|-------------|-------------|
-| GET | /api/tags | Tous les tags |
-| GET | /api/tags/me | Mes tags |
-| POST  | /api/tags/me | Ajouter un tag |
+| Méthode | Endpoint              | Description      |
+| ------- | --------------------- | ---------------- |
+| GET     | /api/tags             | Tous les tags    |
+| GET     | /api/tags/me          | Mes tags         |
+| POST    | /api/tags/me          | Ajouter un tag   |
 | DELETE  | /api/tags/me/:tagName | Supprimer un tag |
 
 ### Photos
 
-| Méthode       | Endpoint    | Description |
-|---------------|-------------|-------------|
-| POST | /api/photos/upload | Upload (1 photo) |
-| GET | /api/photos/me | Mes photos |
-| GET  | /api/photos/user/:id | Photos d'un utilisateur |
-| PUT  | /api/photos/profile/:photoId | Définir photo de profil |
-| DELETE | /api/photos/:photoId | Supprimer une photo |
+| Méthode | Endpoint                     | Description             |
+| ------- | ---------------------------- | ----------------------- |
+| POST    | /api/photos/upload           | Upload (1 photo)        |
+| GET     | /api/photos/me               | Mes photos              |
+| GET     | /api/photos/user/:id         | Photos d'un utilisateur |
+| PUT     | /api/photos/profile/:photoId | Définir photo de profil |
+| DELETE  | /api/photos/:photoId         | Supprimer une photo     |
 
 ### Localisation
 
-| Méthode       | Endpoint    | Description |
-|---------------|-------------|-------------|
-| GET | /api/location/me | Ma localisation |
-| PUT | /api/location/gps | Position GPS |
-| PUT  | /api/location/manual | Ville/quartier |
-| DELETE | /api/location/me | Désactiver |
+| Méthode | Endpoint             | Description     |
+| ------- | -------------------- | --------------- |
+| GET     | /api/location/me     | Ma localisation |
+| PUT     | /api/location/gps    | Position GPS    |
+| PUT     | /api/location/manual | Ville/quartier  |
+| DELETE  | /api/location/me     | Désactiver      |
 
 ### Recherche & Suggestions
 
-| Méthode       | Endpoint    | Description |
-|---------------|-------------|-------------|
-| GET | /api/search | Recherche avancée |
-| GET | /api/search/suggestions | Suggestions |
+| Méthode | Endpoint                | Description       |
+| ------- | ----------------------- | ----------------- |
+| GET     | /api/search             | Recherche avancée |
+| GET     | /api/search/suggestions | Suggestions       |
 
 ### Likes & Matchs
 
-| Méthode       | Endpoint    | Description |
-|---------------|-------------|-------------|
-| POST | /api/likes/:userId | Liker |
-| DELETE | /api/likes/:userId | Unlike |
-| GET | /api/likes/sent | Likes envoyés |
-| GET | /api/likes/received | Likes reçus |
-| GET | /api/likes/matches | Mes matchs |
-| GET | /api/likes/check/:userId | Vérifier like |
+| Méthode | Endpoint                 | Description   |
+| ------- | ------------------------ | ------------- |
+| POST    | /api/likes/:userId       | Liker         |
+| DELETE  | /api/likes/:userId       | Unlike        |
+| GET     | /api/likes/sent          | Likes envoyés |
+| GET     | /api/likes/received      | Likes reçus   |
+| GET     | /api/likes/matches       | Mes matchs    |
+| GET     | /api/likes/check/:userId | Vérifier like |
 
 ### Messages
 
-| Méthode       | Endpoint    | Description |
-|---------------|-------------|-------------|
-| POST | /api/messages/:toUserId | Envoyer (HTTP) |
-| GET | /api/messages/conversations | Liste des conversations |
-| GET | /api/messages/:userId | Conversation |
-| GET | /api/messages/unread | Messages non lus |
+| Méthode | Endpoint                    | Description             |
+| ------- | --------------------------- | ----------------------- |
+| POST    | /api/messages/:toUserId     | Envoyer (HTTP)          |
+| GET     | /api/messages/conversations | Liste des conversations |
+| GET     | /api/messages/:userId       | Conversation            |
+| GET     | /api/messages/unread        | Messages non lus        |
 
 ### Notifications
 
-| Méthode       | Endpoint    | Description |
-|---------------|-------------|-------------|
-| GET | /api/notifications | Mes notifications |
-| GET | /api/notifications/unread/count | Compteur non lues |
-| PUT | /api/notifications/:id/read | Marquer comme lue |
-| PUT | /api/notifications/read-all | Tout marquer |
-| DELETE | /api/notifications/:id | Supprimer une notification |
+| Méthode | Endpoint                        | Description                |
+| ------- | ------------------------------- | -------------------------- |
+| GET     | /api/notifications              | Mes notifications          |
+| GET     | /api/notifications/unread/count | Compteur non lues          |
+| PUT     | /api/notifications/:id/read     | Marquer comme lue          |
+| PUT     | /api/notifications/read-all     | Tout marquer               |
+| DELETE  | /api/notifications/:id          | Supprimer une notification |
 
 ### Blocage
 
-| Méthode       | Endpoint    | Description |
-|---------------|-------------|-------------|
-| POST | /api/blocks/:userId | Bloquer |
-| DELETE | /api/blocks/:userId | Débloquer |
-| GET | /api/blocks/check/:userId | Vérifier blocage |
-| GET | /api/blocks | Liste des bloqués |
+| Méthode | Endpoint                  | Description       |
+| ------- | ------------------------- | ----------------- |
+| POST    | /api/blocks/:userId       | Bloquer           |
+| DELETE  | /api/blocks/:userId       | Débloquer         |
+| GET     | /api/blocks/check/:userId | Vérifier blocage  |
+| GET     | /api/blocks               | Liste des bloqués |
 
 ## 🔌 WebSocket (Socket.io)
 
 ### Connexion
 
 ```javascript
-const socket = io('http://localhost:3000', {
-  auth: { token: 'VOTRE_JWT_TOKEN' }
+const socket = io("http://localhost:3000", {
+  auth: { token: "VOTRE_JWT_TOKEN" },
 });
 ```
 
 ### Événements
 
-| Événement     | Direction   | Description |
-|---------------|-------------|-------------|
-| send_message | Émission | Envoyer un message |
-| new_message | Réception | Recevoir un message |
-| notification | Réception | Recevoir une notification |
-| mark_read | Émission | Marquer comme lu |
-| user_status | Émission | Mise à jour du statut en ligne |
+| Événement    | Direction | Description                    |
+| ------------ | --------- | ------------------------------ |
+| send_message | Émission  | Envoyer un message             |
+| new_message  | Réception | Recevoir un message            |
+| notification | Réception | Recevoir une notification      |
+| mark_read    | Émission  | Marquer comme lu               |
+| user_status  | Émission  | Mise à jour du statut en ligne |
 
 ### Exemple d'envoi de message
 
 ```javascript
-socket.emit('send_message', 
-  { toUserId: 2, content: 'Salut !' },
-  (response) => console.log(response)
+socket.emit("send_message", { toUserId: 2, content: "Salut !" }, (response) =>
+  console.log(response),
 );
 ```
 
 ## 🛠️ Scripts disponibles
 
-| Événement     | Description |
-|---------------|-------------|
-| npm run dev | Démarrer en développement (nodemon) |
-| npm start | Démarrer en production |
-| npm run init-db | Réinitialiser la base de données |
-| npm run seed | Génération de 500 profils de test (randomuser.me) |
+| Événement       | Description                                       |
+| --------------- | ------------------------------------------------- |
+| npm run dev     | Démarrer en développement (nodemon)               |
+| npm start       | Démarrer en production                            |
+| npm run init-db | Réinitialiser la base de données                  |
+| npm run seed    | Génération de 500 profils de test (randomuser.me) |
 
 ## 🌱 Génération des profils de test
 
