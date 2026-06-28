@@ -20,15 +20,15 @@ help:
 	@echo ""
 	@echo "  $(GREEN)make run$(NC)           - 🚀 TOUT EN UN : Docker + install + init-db + seed + serveurs"
 	@echo "  $(GREEN)make docker-up$(NC)     - 🐳 Démarrer PostgreSQL avec Docker"
-	@echo "  $(GREEN)make docker-clean$(NC)  - 🐳 Supprimer les données PostgreSQL"
-	@echo "  $(GREEN)make install$(NC)       - Installer les dépendances"
-	@echo "  $(GREEN)make backend$(NC)       - Lancer le backend (port 3000)"
-	@echo "  $(GREEN)make frontend$(NC)      - Lancer le frontend (port 5173)"
-	@echo "  $(GREEN)make init-db$(NC)       - Initialiser la base de données"
-	@echo "  $(GREEN)make seed$(NC)          - Générer 500 profils de test"
-	@echo "  $(GREEN)make clean$(NC)         - Supprimer node_modules"
-	@echo "  $(GREEN)make fclean$(NC)        - Supprimer node_modules + uploads + Docker"
-	@echo "  $(GREEN)make re$(NC)            - Nettoyage complet + réinstallation + init-db + seed"
+	@echo "  $(GREEN)make docker-clean$(NC)  - 🐳 Supprimer les données ET l'image PostgreSQL"
+	@echo "  $(GREEN)make install$(NC)       - 📦 Installer les dépendances"
+	@echo "  $(GREEN)make backend$(NC)       - 🔧 Lancer le backend (port 3000)"
+	@echo "  $(GREEN)make frontend$(NC)      - 🎨 Lancer le frontend (port 5173)"
+	@echo "  $(GREEN)make init-db$(NC)       - 🗄️  Initialiser la base de données"
+	@echo "  $(GREEN)make seed$(NC)          - 🌱 Générer 500 profils de test"
+	@echo "  $(GREEN)make clean$(NC)         - 🧹 Supprimer node_modules"
+	@echo "  $(GREEN)make fclean$(NC)        - 🧹 Supprimer node_modules + uploads + Docker (conteneur, volume, image)"
+	@echo "  $(GREEN)make re$(NC)            - 🔄 Nettoyage complet + réinstallation + init-db + seed"
 	@echo ""
 
 # ==================== DOCKER ====================
@@ -41,11 +41,11 @@ docker-up:
 	@echo "$(GREEN)✅ PostgreSQL démarré sur le port 5432$(NC)"
 	@echo "$(YELLOW)💡 Utilisateur: postgres, Mot de passe: postgres$(NC)"
 
-# Arrêter PostgreSQL et Supprimer les données PostgreSQL
+# Arrêter PostgreSQL, supprimer les données ET l'image
 docker-clean:
-	@echo "$(BLUE)🐳 Suppression des données PostgreSQL...$(NC)"
-	@docker-compose -f $(COMPOSE_FILE) down -v 2>/dev/null || true
-	@echo "$(GREEN)✅ Données supprimées$(NC)"
+	@echo "$(BLUE)🐳 Suppression du conteneur, des données et de l'image PostgreSQL...$(NC)"
+	@docker-compose -f $(COMPOSE_FILE) down -v --rmi all 2>/dev/null || true
+	@echo "$(GREEN)✅ PostgreSQL nettoyé (conteneur, volume, image supprimés)$(NC)"
 
 # ==================== INSTALLATION ====================
 
@@ -105,7 +105,7 @@ clean:
 fclean: clean docker-clean
 	@echo "$(BLUE)🧹 Suppression des uploads...$(NC)"
 	@rm -rf $(BACKEND_DIR)/uploads
-	@echo "$(GREEN)✅ Nettoyage complet terminé$(NC)"
+	@echo "$(GREEN)✅ Nettoyage complet terminé (node_modules, uploads, PostgreSQL, image)$(NC)"
 
 # Rebuild complet (nettoyage + réinstallation + init-db + seed)
 re: fclean install init-db seed
