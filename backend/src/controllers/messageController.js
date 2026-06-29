@@ -70,8 +70,8 @@ const sendMessage = async (req, res) => {
 const getConversation = async (req, res) => {
   try {
     const { userId } = req.params;
-    const limit = parseInt(req.query.limit) || 50;
-    const offset = parseInt(req.query.offset) || 0;
+    const limit = Math.max(1, parseInt(req.query.limit) || 50);
+    const offset = Math.max(0, parseInt(req.query.offset) || 0);
 
     const messages = await messageModel.getConversation(
       req.userId,

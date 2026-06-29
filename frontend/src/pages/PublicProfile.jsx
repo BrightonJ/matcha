@@ -3,10 +3,12 @@ import { useParams, useNavigate } from 'react-router-dom';
 import API_URL from '../config/api';
 import { calculateAge } from '../utils/age';
 import '../assets/css/publicProfile.css';
+import { useNotifications } from '../context/NotificationContext';
 
 function PublicProfileProd() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { triggerToast } = useNotifications();
   
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -31,7 +33,6 @@ function PublicProfileProd() {
       })
       .catch(() => navigate('/search'));
 
-    // Vérifier si je l'ai déjà liké
     fetch(`${API_URL}/likes/check/${id}`, { headers: { 'Authorization': `Bearer ${token}` } })
       .then(res => res.json())
       .then(data => setIsLikedByMe(data.liked))
@@ -63,8 +64,23 @@ function PublicProfileProd() {
   };
 
   const handleReport = async () => {
-    await fetch(`${API_URL}/profile/report/${id}`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
-    alert('🚩 Profil signalé.');
+    if (window.confirm("Voulez-vous vraiment signaler cet utilisateur comme faux compte ?")) {
+      try {
+        const response = await fetch(`${API_URL}/reports/${id}`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await response.json();
+        
+        if (response.ok) {
+          triggerToast("Utilisateur signalé avec succès.");
+        } else {
+          triggerToast(data.error || "Erreur lors du signalement.");
+        }
+      } catch (err) {
+        triggerToast("Erreur serveur lors du signalement.");
+      }
+    }
   };
 
   if (loading) return <div className="public-profile-container" style={{ textAlign: 'center', padding: '3rem' }}>Recherche du profil en cours...</div>;

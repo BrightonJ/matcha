@@ -14,8 +14,8 @@ const searchUsers = async (req, res) => {
       tags: req.query.tags ? req.query.tags.split(',') : null,
       orderBy: req.query.orderBy || 'popularity_score',
       orderDirection: req.query.orderDirection || 'DESC',
-      limit: req.query.limit ? parseInt(req.query.limit) : 20,
-      offset: req.query.offset ? parseInt(req.query.offset) : 0
+      limit: req.query.limit ? Math.max(1, parseInt(req.query.limit)) : 20,
+      offset: req.query.offset ? Math.max(0, parseInt(req.query.offset)) : 0
     };
     
     const users = await searchModel.searchUsers(filters, req.userId);

@@ -8,6 +8,7 @@ const visitModel = require("./visitModel");
 const messageModel = require("./messageModel");
 const notificationModel = require("./notificationModel");
 const blockModel = require("./blockModel");
+const reportModel = require("./reportModel");
 
 module.exports = {
   user: userModel,
@@ -20,4 +21,5 @@ module.exports = {
   message: messageModel,
   notification: notificationModel,
   block: blockModel,
+  report: reportModel,
 };

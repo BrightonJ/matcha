@@ -1,39 +1,45 @@
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const { user: userModel } = require('../models');
-require('dotenv').config();
 const crypto = require('crypto');
-const { sendVerificationEmail } = require('../services/emailService');
+const { user: userModel } = require('../models');
+const pool = require('../db/pool');
+const { sendVerificationEmail, sendPasswordResetEmail } = require('../services/emailService');
+require('dotenv').config();
+
+const validatePassword = (pwd) => {
+  const forbiddenWords = ['password', 'coffee', 'love', '123456', 'azerty', 'qwerty'];
+  const lowerPwd = pwd.toLowerCase();
+  if (forbiddenWords.some(word => lowerPwd.includes(word))) return false;
+  const regex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[a-zA-Z\d\W]{8,}$/;
+  return regex.test(pwd);
+};
 
 const register = async (req, res) => {
   try {
     const { email, username, firstName, lastName, password } = req.body;
 
-    // Vérifier que tous les champs sont présents
     if (!email || !username || !firstName || !lastName || !password) {
       return res.status(400).json({ error: 'Tous les champs sont requis' });
     }
 
-    // Vérifier si l'email existe déjà
+    if (!validatePassword(password)) {
+      return res.status(400).json({ error: 'Le mot de passe est trop faible ou contient un mot interdit.' });
+    }
+
     const emailExists = await userModel.emailExists(email);
     if (emailExists) {
       return res.status(400).json({ error: 'Cet email est déjà utilisé' });
     }
 
-    // Vérifier si le username existe déjà
     const usernameExists = await userModel.usernameExists(username);
     if (usernameExists) {
       return res.status(400).json({ error: 'Ce nom d\'utilisateur est déjà pris' });
     }
 
-    // Hasher le mot de passe
     const passwordHash = await bcrypt.hash(password, 10);
-
-    // Générer un token de vérification
     const verificationToken = crypto.randomBytes(32).toString('hex');
-    const verificationExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24h
+    const verificationExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
-    // Créer l'utilisateur AVEC le token de vérification
     const newUser = await userModel.createWithVerification({
       email,
       username,
@@ -44,10 +50,8 @@ const register = async (req, res) => {
       verificationExpires
     });
 
-    // Envoyer l'email de vérification
     await sendVerificationEmail(email, username, verificationToken);
 
-    // Ne pas renvoyer le mot de passe
     const { password_hash, ...userWithoutPassword } = newUser;
 
     res.status(201).json({
@@ -56,50 +60,43 @@ const register = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Erreur lors de l\'inscription:', error);
+    console.error(error);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 };
 
 const login = async (req, res) => {
   try {
-
     if (!req.body) {
       return res.status(400).json({ error: 'Aucun champ fourni' });
     }
 
     const { username, password } = req.body;
 
-    // Vérifier que les champs sont présents
     if (!username || !password) {
       return res.status(400).json({ error: 'Nom d\'utilisateur et mot de passe requis' });
     }
 
-    // Chercher l'utilisateur par username
     const user = await userModel.findByUsernameWithPassword(username);
     if (!user) {
-      return res.status(401).json({ error: 'Nom d\'utilisateur inconu' });
+      return res.status(401).json({ error: 'Nom d\'utilisateur inconnu' });
     }
 
-    // Vérifier le mot de passe
     const isPasswordValid = await bcrypt.compare(password, user.password_hash);
     if (!isPasswordValid) {
       return res.status(401).json({ error: 'Mot de passe incorrect' });
     }
 
-    // Vérifier si le compte est vérifié
     if (!user.is_verified) {
       return res.status(401).json({ error: 'Veuillez vérifier votre email avant de vous connecter' });
     }
 
-    // Générer un token JWT
     const token = jwt.sign(
       { userId: user.id, username: user.username },
       process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRES_IN }
     );
 
-    // Ne pas renvoyer le mot de passe
     const { password_hash, ...userWithoutPassword } = user;
 
     res.json({
@@ -109,7 +106,7 @@ const login = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Erreur lors de la connexion:', error);
+    console.error(error);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 };
@@ -118,21 +115,82 @@ const verifyEmail = async (req, res) => {
   try {
     const { token } = req.params;
     
-    // Chercher l'utilisateur par token
     const user = await userModel.findByVerificationToken(token);
     
     if (!user) {
       return res.status(400).json({ error: 'Token invalide ou expiré' });
     }
     
-    // Marquer l'utilisateur comme vérifié
     await userModel.verifyUser(user.id);
     
     res.json({ message: 'Email vérifié avec succès ! Tu peux maintenant te connecter.' });
   } catch (error) {
-    console.error('Erreur lors de la vérification:', error);
+    console.error(error);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 };
 
-module.exports = { register, login, verifyEmail };
+const forgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email requis' });
+
+    const user = await userModel.findByEmail(email);
+    if (!user) {
+      return res.json({ message: 'Si cet email existe, un lien de réinitialisation a été envoyé.' });
+    }
+
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const resetExpires = new Date(Date.now() + 3600000);
+
+    await pool.query(
+      'UPDATE users SET reset_token = $1, reset_expires = $2 WHERE id = $3',
+      [resetToken, resetExpires, user.id]
+    );
+
+    await sendPasswordResetEmail(user.email, user.username, resetToken);
+
+    res.json({ message: 'Si cet email existe, un lien de réinitialisation a été envoyé.' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+};
+
+const resetPassword = async (req, res) => {
+  try {
+    const { token, newPassword } = req.body;
+
+    if (!token || !newPassword) {
+      return res.status(400).json({ error: 'Token et nouveau mot de passe requis' });
+    }
+
+    if (!validatePassword(newPassword)) {
+      return res.status(400).json({ error: 'Le mot de passe est trop faible.' });
+    }
+
+    const result = await pool.query(
+      'SELECT id FROM users WHERE reset_token = $1 AND reset_expires > NOW()',
+      [token]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(400).json({ error: 'Token invalide ou expiré' });
+    }
+
+    const userId = result.rows[0].id;
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+
+    await pool.query(
+      'UPDATE users SET password_hash = $1, reset_token = NULL, reset_expires = NULL WHERE id = $2',
+      [passwordHash, userId]
+    );
+
+    res.json({ message: 'Mot de passe réinitialisé avec succès ! Tu peux te connecter.' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+};
+
+module.exports = { register, login, verifyEmail, forgotPassword, resetPassword };

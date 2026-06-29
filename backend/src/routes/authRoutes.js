@@ -11,4 +11,7 @@ router.post('/register', authController.register);
 // Connexion d'un utilisateur existant
 router.post('/login', authController.login);
 
+router.post('/forgot-password', authController.forgotPassword);
+router.post('/reset-password', authController.resetPassword);
+
 module.exports = router;

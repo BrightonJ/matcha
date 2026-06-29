@@ -68,7 +68,7 @@ const searchModel = {
     return { whereClause, values, nextIndex: paramIndex };
   },
 
-  async searchUsers(filters, currentUserId) {
+async searchUsers(filters, currentUserId) {
     const { whereClause, values, nextIndex } = this._buildWhereClause(
       filters,
       currentUserId,
@@ -79,9 +79,12 @@ const searchModel = {
              u.sexual_preferences, u.is_verified, u.popularity_score, u.last_seen,
              u.latitude, u.longitude, u.location_city, u.location_manual,
              u.birth_date,
+             EXTRACT(YEAR FROM age(CURRENT_DATE, u.birth_date)) as age,
              (SELECT COUNT(*) FROM photos WHERE user_id = u.id) as photo_count,
              (SELECT url FROM photos WHERE user_id = u.id AND is_profile = true) as profile_photo,
              (SELECT is_external FROM photos WHERE user_id = u.id AND is_profile = true) as photo_is_external,
+             (SELECT COUNT(*) FROM user_tags WHERE user_id = u.id AND tag_id IN 
+                (SELECT tag_id FROM user_tags WHERE user_id = $1)) as common_tags,
              COALESCE(
                (SELECT json_agg(t.name) 
                 FROM user_tags ut 
@@ -93,19 +96,22 @@ const searchModel = {
       WHERE ${whereClause}
     `;
 
-    const allowedOrderBy = ["popularity_score", "last_seen", "created_at"];
+    const allowedOrderBy = ["popularity_score", "age", "location_city", "common_tags"];
     const orderBy = allowedOrderBy.includes(filters.orderBy)
       ? filters.orderBy
       : "popularity_score";
     const orderDirection = filters.orderDirection === "ASC" ? "ASC" : "DESC";
+    
     query += ` ORDER BY ${orderBy} ${orderDirection}`;
 
     const limit = Math.min(filters.limit || 20, 100);
     const offset = filters.offset || 0;
-    query += ` LIMIT $${nextIndex} OFFSET $${nextIndex + 1}`;
-    values.push(limit, offset);
+    
+    const finalValues = [currentUserId, ...values, limit, offset];
+    
+    query += ` LIMIT $${nextIndex + 1} OFFSET $${nextIndex + 2}`;
 
-    const result = await pool.query(query, values);
+    const result = await pool.query(query, finalValues);
 
     return result.rows.map((row) => ({
       ...row,

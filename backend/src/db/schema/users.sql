@@ -9,6 +9,8 @@ CREATE TABLE IF NOT EXISTS users (
     is_verified BOOLEAN DEFAULT FALSE,
     verification_token VARCHAR(255),
     verification_expires TIMESTAMP,
+    reset_token VARCHAR(255),
+    reset_expires TIMESTAMP,
     bio TEXT,
     gender VARCHAR(20),
     sexual_preferences VARCHAR(20) DEFAULT 'bisexual',

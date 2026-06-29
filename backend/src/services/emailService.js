@@ -31,11 +31,36 @@ const sendVerificationEmail = async (email, username, verificationToken) => {
 
   try {
     await transporter.sendMail(mailOptions);
-    console.log(`Email de vérification envoyé à ${email}`);
   } catch (error) {
-    console.error('Erreur lors de l\'envoi de l\'email:', error);
+    console.error(error);
     throw error;
   }
 };
 
-module.exports = { sendVerificationEmail };
+const sendPasswordResetEmail = async (email, username, resetToken) => {
+  const resetUrl = `http://localhost:5173/reset-password/${resetToken}`;
+  
+  const mailOptions = {
+    from: `"Matcha" <${process.env.EMAIL_USER}>`,
+    to: email,
+    subject: 'Réinitialisation de ton mot de passe Matcha',
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h1 style="color: #e91e63;">Bonjour ${username},</h1>
+        <p>Tu as demandé à réinitialiser ton mot de passe.</p>
+        <a href="${resetUrl}" style="display: inline-block; background-color: #e91e63; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; margin: 20px 0;">Réinitialiser mon mot de passe</a>
+        <p>Ce lien est valide pendant 1 heure.</p>
+        <p>Si tu n'as pas fait cette demande, ignore simplement cet email.</p>
+      </div>
+    `,
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+  } catch (error) {
+    console.error(error);
+    throw error;
+  }
+};
+
+module.exports = { sendVerificationEmail, sendPasswordResetEmail };
