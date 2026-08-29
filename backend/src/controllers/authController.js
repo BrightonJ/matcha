@@ -10,7 +10,7 @@ const validatePassword = (pwd) => {
   const forbiddenWords = ['password', 'coffee', 'love', '123456', 'azerty', 'qwerty'];
   const lowerPwd = pwd.toLowerCase();
   if (forbiddenWords.some(word => lowerPwd.includes(word))) return false;
-  const regex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[a-zA-Z\d\W]{8,}$/;
+  const regex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/;
   return regex.test(pwd);
 };
 

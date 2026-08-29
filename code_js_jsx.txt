@@ -1,0 +1,5680 @@
+
+
+=== FILE: ./backend/app.js ===
+
+const express = require("express");
+const morgan = require("morgan");
+const path = require("path");
+const http = require("http");
+const { initSocket } = require("./src/socket");
+const cors = require('cors');
+require("dotenv").config();
+
+// Importer les routes
+const authRoutes = require("./src/routes/authRoutes");
+const profileRoutes = require("./src/routes/profileRoutes");
+const tagRoutes = require("./src/routes/tagRoutes");
+const photoRoutes = require("./src/routes/photoRoutes");
+const locationRoutes = require("./src/routes/locationRoutes");
+const searchRoutes = require("./src/routes/searchRoutes");
+const likeRoutes = require("./src/routes/likeRoutes");
+const messageRoutes = require("./src/routes/messageRoutes");
+const notificationRoutes = require("./src/routes/notificationRoutes");
+const blockRoutes = require('./src/routes/blockRoutes');
+const reportRoutes = require('./src/routes/reportRoutes');
+
+const PORT = process.env.PORT;
+const app = express();
+
+app.use(morgan("short"));
+app.use(express.json());
+
+// Configurer CORS pour autoriser les requêtes du frontend
+app.use(cors({
+  origin: process.env.FRONTEND_URL,
+  credentials: true
+}));
+
+// Configurer CORS pour autoriser localhost ET 127.0.0.1
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  process.env.FRONTEND_URL
+].filter(Boolean);
+
+app.use(cors({
+  origin: function(origin, callback) {
+    // Permettre les requêtes sans origin (curl, postman)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true
+}));
+
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// Routes
+app.use("/api/auth", authRoutes);
+app.use("/api/profile", profileRoutes);
+app.use("/api/tags", tagRoutes);
+app.use("/api/photos", photoRoutes);
+app.use("/api/location", locationRoutes);
+app.use("/api/search", searchRoutes);
+app.use("/api/likes", likeRoutes);
+app.use("/api/messages", messageRoutes);
+app.use("/api/notifications", notificationRoutes);
+app.use("/api/blocks", blockRoutes);
+app.use("/api/reports", reportRoutes);
+const server = http.createServer(app);
+
+global.io = initSocket(server);
+
+server.listen(PORT, () => {
+});
+
+
+=== FILE: ./backend/src/controllers/authController.js ===
+
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+const { user: userModel } = require('../models');
+const pool = require('../db/pool');
+const { sendVerificationEmail, sendPasswordResetEmail } = require('../services/emailService');
+require('dotenv').config();
+
+const validatePassword = (pwd) => {
+  const forbiddenWords = ['password', 'coffee', 'love', '123456', 'azerty', 'qwerty'];
+  const lowerPwd = pwd.toLowerCase();
+  if (forbiddenWords.some(word => lowerPwd.includes(word))) return false;
+  const regex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/;
+  return regex.test(pwd);
+};
+
+const register = async (req, res) => {
+  try {
+    const { email, username, firstName, lastName, password } = req.body;
+
+    if (!email || !username || !firstName || !lastName || !password) {
+      return res.status(400).json({ error: 'Tous les champs sont requis' });
+    }
+
+    if (!validatePassword(password)) {
+      return res.status(400).json({ error: 'Le mot de passe est trop faible ou contient un mot interdit.' });
+    }
+
+    const emailExists = await userModel.emailExists(email);
+    if (emailExists) {
+      return res.status(400).json({ error: 'Cet email est déjà utilisé' });
+    }
+
+    const usernameExists = await userModel.usernameExists(username);
+    if (usernameExists) {
+      return res.status(400).json({ error: 'Ce nom d\'utilisateur est déjà pris' });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    const verificationToken = crypto.randomBytes(32).toString('hex');
+    const verificationExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+    const newUser = await userModel.createWithVerification({
+      email,
+      username,
+      firstName,
+      lastName,
+      passwordHash,
+      verificationToken,
+      verificationExpires
+    });
+
+    await sendVerificationEmail(email, username, verificationToken);
+
+    const { password_hash, ...userWithoutPassword } = newUser;
+
+    res.status(201).json({
+      message: 'Inscription réussie ! Un email de vérification a été envoyé.',
+      user: userWithoutPassword
+    });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+};
+
+const login = async (req, res) => {
+  try {
+    if (!req.body) {
+      return res.status(400).json({ error: 'Aucun champ fourni' });
+    }
+
+    const { username, password } = req.body;
+
+    if (!username || !password) {
+      return res.status(400).json({ error: 'Nom d\'utilisateur et mot de passe requis' });
+    }
+
+    const user = await userModel.findByUsernameWithPassword(username);
+    if (!user) {
+      return res.status(401).json({ error: 'Nom d\'utilisateur inconnu' });
+    }
+
+    const isPasswordValid = await bcrypt.compare(password, user.password_hash);
+    if (!isPasswordValid) {
+      return res.status(401).json({ error: 'Mot de passe incorrect' });
+    }
+
+    if (!user.is_verified) {
+      return res.status(401).json({ error: 'Veuillez vérifier votre email avant de vous connecter' });
+    }
+
+    const token = jwt.sign(
+      { userId: user.id, username: user.username },
+      process.env.JWT_SECRET,
+      { expiresIn: process.env.JWT_EXPIRES_IN }
+    );
+
+    const { password_hash, ...userWithoutPassword } = user;
+
+    res.json({
+      message: 'Connexion réussie !',
+      token,
+      user: userWithoutPassword
+    });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+};
+
+const verifyEmail = async (req, res) => {
+  try {
+    const { token } = req.params;
+    
+    const user = await userModel.findByVerificationToken(token);
+    
+    if (!user) {
+      return res.status(400).json({ error: 'Token invalide ou expiré' });
+    }
+    
+    await userModel.verifyUser(user.id);
+    
+    res.json({ message: 'Email vérifié avec succès ! Tu peux maintenant te connecter.' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+};
+
+const forgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email requis' });
+
+    const user = await userModel.findByEmail(email);
+    if (!user) {
+      return res.json({ message: 'Si cet email existe, un lien de réinitialisation a été envoyé.' });
+    }
+
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const resetExpires = new Date(Date.now() + 3600000);
+
+    await pool.query(
+      'UPDATE users SET reset_token = $1, reset_expires = $2 WHERE id = $3',
+      [resetToken, resetExpires, user.id]
+    );
+
+    await sendPasswordResetEmail(user.email, user.username, resetToken);
+
+    res.json({ message: 'Si cet email existe, un lien de réinitialisation a été envoyé.' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+};
+
+const resetPassword = async (req, res) => {
+  try {
+    const { token, newPassword } = req.body;
+
+    if (!token || !newPassword) {
+      return res.status(400).json({ error: 'Token et nouveau mot de passe requis' });
+    }
+
+    if (!validatePassword(newPassword)) {
+      return res.status(400).json({ error: 'Le mot de passe est trop faible.' });
+    }
+
+    const result = await pool.query(
+      'SELECT id FROM users WHERE reset_token = $1 AND reset_expires > NOW()',
+      [token]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(400).json({ error: 'Token invalide ou expiré' });
+    }
+
+    const userId = result.rows[0].id;
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+
+    await pool.query(
+      'UPDATE users SET password_hash = $1, reset_token = NULL, reset_expires = NULL WHERE id = $2',
+      [passwordHash, userId]
+    );
+
+    res.json({ message: 'Mot de passe réinitialisé avec succès ! Tu peux te connecter.' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+};
+
+module.exports = { register, login, verifyEmail, forgotPassword, resetPassword };
+
+=== FILE: ./backend/src/controllers/blockController.js ===
+
+const { block } = require('../models');
+
+// Bloquer un utilisateur
+const blockUser = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const blockedId = parseInt(userId);
+    
+    if (isNaN(blockedId)) {
+      return res.status(400).json({ error: 'ID utilisateur invalide' });
+    }
+    
+    if (blockedId === req.userId) {
+      return res.status(400).json({ error: 'Vous ne pouvez pas vous bloquer vous-même' });
+    }
+    
+    const result = await block.add(req.userId, blockedId);
+    
+    if (!result) {
+      return res.status(400).json({ error: 'Utilisateur déjà bloqué' });
+    }
+    
+    res.json({ message: 'Utilisateur bloqué avec succès' });
+  } catch (error) {
+    console.error('Erreur:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+};
+
+// Débloquer un utilisateur
+const unblockUser = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const blockedId = parseInt(userId);
+    
+    if (isNaN(blockedId)) {
+      return res.status(400).json({ error: 'ID utilisateur invalide' });
+    }
+    
+    const result = await block.remove(req.userId, blockedId);
+    
+    if (!result) {
+      return res.status(404).json({ error: 'Blocage non trouvé' });
+    }
+    
+    res.json({ message: 'Utilisateur débloqué avec succès' });
+  } catch (error) {
+    console.error('Erreur:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+};
+
+// Vérifier si un utilisateur est bloqué
+const checkBlock = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const targetId = parseInt(userId);
+    
+    if (isNaN(targetId)) {
+      return res.status(400).json({ error: 'ID utilisateur invalide' });
+    }
+    
+    const isBlocked = await block.isBlocked(req.userId, targetId);
+    res.json({ blocked: isBlocked });
+  } catch (error) {
+    console.error('Erreur:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+};
+
+// Récupérer la liste des utilisateurs bloqués
+const getBlockedUsers = async (req, res) => {
+  try {
+    const blockedUsers = await block.getBlockedUsers(req.userId);
+    res.json(blockedUsers);
+  } catch (error) {
+    console.error('Erreur:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+};
+
+module.exports = { blockUser, unblockUser, checkBlock, getBlockedUsers };
+
+
+=== FILE: ./backend/src/controllers/likeController.js ===
+
+const { like } = require('../models');
+const { getIo } = require('../socket');
+
+// Liker un utilisateur
+const addLike = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const toUserId = parseInt(userId);
+    
+    if (isNaN(toUserId)) {
+      return res.status(400).json({ error: 'ID utilisateur invalide' });
+    }
+    
+    if (toUserId === req.userId) {
+      return res.status(400).json({ error: 'Vous ne pouvez pas vous liker vous-même' });
+    }
+    
+    const io = getIo();
+    const result = await like.add(req.userId, toUserId, io);
+    
+    if (result.isMatch) {
+      res.json({ 
+        message: '❤️ C\'est un match ! Vous pouvez maintenant discuter',
+        match: true
+      });
+    } else {
+      res.json({ 
+        message: '👍 Like ajouté',
+        match: false
+      });
+    }
+  } catch (error) {
+    console.error('Erreur:', error);
+    
+    if (error.code === 'USER_NOT_FOUND' || 
+        error.code === 'NO_PROFILE_PHOTO' || 
+        error.code === 'LIKE_ALREADY_EXISTS' ||
+        error.code === 'BLOCKED') {
+      return res.status(400).json({ error: error.message });
+    }
+    
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+};
+
+// Unlike (supprimer un like)
+const removeLike = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const toUserId = parseInt(userId);
+    
+    if (isNaN(toUserId)) {
+      return res.status(400).json({ error: 'ID utilisateur invalide' });
+    }
+    
+    const io = getIo();
+    const removed = await like.remove(req.userId, toUserId, io);
+    
+    if (!removed) {
+      return res.status(404).json({ error: 'Like non trouvé' });
+    }
+    
+    res.json({ message: '👎 Like retiré' });
+  } catch (error) {
+    console.error('Erreur:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+};
+
+// Voir mes likes reçus
+const getReceivedLikes = async (req, res) => {
+  try {
+    const likes = await like.getReceivedLikes(req.userId);
+    res.json(likes);
+  } catch (error) {
+    console.error('Erreur:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+};
+
+// Voir mes likes envoyés
+const getSentLikes = async (req, res) => {
+  try {
+    const likes = await like.getSentLikes(req.userId);
+    res.json(likes);
+  } catch (error) {
+    console.error('Erreur:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+};
+
+// Voir mes matchs
+const getMatches = async (req, res) => {
+  try {
+    const matches = await like.getMatches(req.userId);
+    res.json(matches);
+  } catch (error) {
+    console.error('Erreur:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+};
+
+const checkLike = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const toUserId = parseInt(userId);
+    
+    if (isNaN(toUserId)) {
+      return res.status(400).json({ error: 'ID utilisateur invalide' });
+    }
+    
+    const liked = await like.exists(req.userId, toUserId);
+    const likesMe = await like.exists(toUserId, req.userId); // Vérifie si l'autre t'a liké
+    
+    res.json({ liked, likesMe });
+  } catch (error) {
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+};
+
+module.exports = { addLike, removeLike, getReceivedLikes, getSentLikes, getMatches, checkLike };
+
+
+=== FILE: ./backend/src/controllers/locationController.js ===
+
+const { location } = require("../models");
+
+// Récupère la localisation de l'utilisateur connecté
+const getMyLocation = async (req, res) => {
+  try {
+    const userLocation = await location.getUserLocation(req.userId);
+    res.json(userLocation);
+  } catch (error) {
+    console.error("Erreur:", error);
+    res.status(500).json({ error: "Erreur serveur" });
+  }
+};
+
+// Met à jour la localisation GPS de l'utilisateur
+const updateGpsLocation = async (req, res) => {
+  try {
+    const { latitude, longitude, city } = req.body;
+
+    if (latitude === undefined || longitude === undefined) {
+      return res
+        .status(400)
+        .json({ error: "❌ latitude et longitude sont requis" });
+    }
+
+    if (typeof latitude !== "number" || typeof longitude !== "number") {
+      return res
+        .status(400)
+        .json({ error: "❌ latitude et longitude doivent être des nombres" });
+    }
+
+    if (latitude < -90 || latitude > 90) {
+      return res
+        .status(400)
+        .json({ error: "❌ latitude doit être comprise entre -90 et 90" });
+    }
+
+    if (longitude < -180 || longitude > 180) {
+      return res
+        .status(400)
+        .json({ error: "❌ longitude doit être comprise entre -180 et 180" });
+    }
+
+    // Mettre à jour GPS et optionnellement la ville
+    const updated = await location.updateGps(
+      req.userId,
+      latitude,
+      longitude,
+      city,
+    );
+
+    res.json({
+      message: "📍 Localisation GPS mise à jour",
+      location: updated,
+    });
+  } catch (error) {
+    console.error("Erreur:", error);
+    res.status(500).json({ error: "❌ Erreur serveur" });
+  }
+};
+
+// Met à jour la localisation manuelle de l'utilisateur
+const updateManualLocation = async (req, res) => {
+  try {
+    const { city } = req.body;
+
+    if (!city || typeof city !== "string" || city.trim().length === 0) {
+      return res
+        .status(400)
+        .json({ error: "Une ville ou quartier valide est requis" });
+    }
+
+    const updated = await location.updateManual(req.userId, city.trim());
+
+    res.json({
+      message: "Localisation manuelle mise à jour",
+      location: updated,
+    });
+  } catch (error) {
+    console.error("Erreur:", error);
+    res.status(500).json({ error: "Erreur serveur" });
+  }
+};
+
+// Désactive la localisation de l'utilisateur
+const disableLocation = async (req, res) => {
+  try {
+    const updated = await location.disable(req.userId);
+
+    res.json({
+      message: "Localisation désactivée",
+      location: updated,
+    });
+  } catch (error) {
+    console.error("Erreur:", error);
+    res.status(500).json({ error: "Erreur serveur" });
+  }
+};
+
+module.exports = {
+  getMyLocation,
+  updateGpsLocation,
+  updateManualLocation,
+  disableLocation,
+};
+
+
+=== FILE: ./backend/src/controllers/messageController.js ===
+
+const {
+  user: userModel,
+  message: messageModel,
+  notification: notificationModel,
+  like: likeModel,
+  block: blockModel,
+} = require("../models");
+
+// Envoyer un message à un utilisateur
+const sendMessage = async (req, res) => {
+  try {
+    const { toUserId } = req.params;
+    const { content } = req.body;
+    const fromUserId = req.userId;
+
+    if (!content || content.trim().length === 0) {
+      return res
+        .status(400)
+        .json({ error: "Le message ne peut pas être vide" });
+    }
+
+    // Vérifier que les deux utilisateurs sont matchés
+    const isMatch = await likeModel.isMatch(fromUserId, parseInt(toUserId));
+    if (!isMatch) {
+      return res.status(403).json({ error: "Vous devez être matché pour envoyer un message" });
+    }
+    
+    // Vérifier que personne n'est bloqué
+    const blockedHim = await blockModel.isBlocked(fromUserId, parseInt(toUserId));
+    const blockedByHim = await blockModel.isBlocked(parseInt(toUserId), fromUserId);
+    if (blockedHim || blockedByHim) {
+      return res.status(403).json({ error: "Vous ne pouvez pas envoyer de message à cet utilisateur" });
+    }
+
+    const newMessage = await messageModel.send(
+      fromUserId,
+      parseInt(toUserId),
+      content,
+    );
+
+    // Créer une notification de message
+    const fromUser = await userModel.findById(fromUserId);
+    const notification = await notificationModel.create(
+      toUserId,
+      "message",
+      fromUserId,
+      `${fromUser.username} vous a envoyé un message`,
+      { messageId: newMessage.id },
+    );
+
+    const io = global.io;
+    if (!io) {
+      const error = Error("Socket.io not initialized");
+      error.code = "SOCKET_IO_NOT_INITIALIZED";
+      throw error;
+    }
+    io.to(`user:${toUserId}`).emit("notification", notification);
+
+    res.status(201).json(newMessage);
+  } catch (error) {
+    console.error("Erreur:", error);
+    if (error.message === "Vous devez être matché pour envoyer un message") {
+      return res.status(403).json({ error: error.message });
+    }
+    res.status(500).json({ error: "Erreur serveur" });
+  }
+};
+
+// Récupérer la conversation avec un utilisateur
+const getConversation = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const limit = Math.max(1, parseInt(req.query.limit) || 50);
+    const offset = Math.max(0, parseInt(req.query.offset) || 0);
+
+    const messages = await messageModel.getConversation(
+      req.userId,
+      parseInt(userId),
+      limit,
+      offset,
+    );
+
+    // Marquer comme lus
+    await messageModel.markAsRead(req.userId, parseInt(userId));
+
+    res.json(messages);
+  } catch (error) {
+    console.error("Erreur:", error);
+    res.status(500).json({ error: "Erreur serveur" });
+  }
+};
+
+// Récupérer toutes les conversations
+const getConversations = async (req, res) => {
+  try {
+    const conversations = await messageModel.getConversations(req.userId);
+    res.json(conversations);
+  } catch (error) {
+    console.error("Erreur:", error);
+    res.status(500).json({ error: "Erreur serveur" });
+  }
+};
+
+// Compter les messages non lus
+const getUnreadCount = async (req, res) => {
+  try {
+    const count = await messageModel.countUnread(req.userId);
+    res.json({ unreadCount: count });
+  } catch (error) {
+    console.error("Erreur:", error);
+    res.status(500).json({ error: "Erreur serveur" });
+  }
+};
+
+module.exports = {
+  sendMessage,
+  getConversation,
+  getConversations,
+  getUnreadCount,
+};
+
+
+=== FILE: ./backend/src/controllers/notificationController.js ===
+
+const { notification } = require('../models');
+
+// Récupérer mes notifications
+const getMyNotifications = async (req, res) => {
+  try {
+    const notifications = await notification.getUserNotifications(req.userId);
+    res.json(notifications);
+  } catch (error) {
+    console.error('Erreur:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+};
+
+// Marquer une notification comme lue
+const markAsRead = async (req, res) => {
+  try {
+    const { id } = req.params;
+    await notification.markAsRead(parseInt(id), req.userId);
+    res.json({ message: 'Notification marquée comme lue' });
+  } catch (error) {
+    console.error('Erreur:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+};
+
+// Marquer toutes les notifications comme lues
+const markAllAsRead = async (req, res) => {
+  try {
+    await notification.markAllAsRead(req.userId);
+    res.json({ message: 'Toutes les notifications ont été marquées comme lues' });
+  } catch (error) {
+    console.error('Erreur:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+};
+
+// Compter les notifications non lues
+const getUnreadCount = async (req, res) => {
+  try {
+    const count = await notification.countUnread(req.userId);
+    res.json({ unreadCount: count });
+  } catch (error) {
+    console.error('Erreur:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+};
+
+// Supprimer une notification
+const deleteNotification = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await notification.delete(parseInt(id), req.userId);
+    
+    if (!result) {
+      return res.status(404).json({ error: 'Notification non trouvée' });
+    }
+    
+    res.json({ message: 'Notification supprimée' });
+  } catch (error) {
+    console.error('Erreur:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+};
+
+module.exports = { getMyNotifications, markAsRead, markAllAsRead, getUnreadCount, deleteNotification };
+
+
+=== FILE: ./backend/src/controllers/photoController.js ===
+
+const fs = require("fs");
+const path = require("path");
+const multer = require("multer");
+const { user: userModel, photo: photoModel } = require("../models");
+
+// Middleware de gestion d'erreur multer
+const handleMulterError = (err, req, res, next) => {
+  if (err instanceof multer.MulterError) {
+    if (err.code === "LIMIT_FILE_SIZE") {
+      return res.status(400).json({ error: "Fichier trop gros (max 5MB)" });
+    }
+    if (err.code === "LIMIT_UNEXPECTED_FILE") {
+      return res
+        .status(400)
+        .json({ error: 'Champ invalide. Utilisez "photo" comme nom de champ' });
+    }
+    if (err.code === "LIMIT_FILE_COUNT") {
+      return res.status(400).json({
+        error:
+          "Une seule image à la fois. Veuillez envoyer les photos une par une.",
+      });
+    }
+    return res.status(400).json({ error: `Erreur: ${err.message}` });
+  }
+  if (err) {
+    return res.status(400).json({ error: `${err.message}` });
+  }
+  next();
+};
+
+// Upload d'une photo
+const uploadPhoto = async (req, res) => {
+  try {
+    // Vérifier qu'un fichier a été envoyé
+    if (!req.file) {
+      return res.status(400).json({
+        error: 'Aucun fichier uploadé. Le champ doit s\'appeler "photo"',
+      });
+    }
+
+    // Vérifier le nombre de photos
+    const photoCount = await photoModel.count(req.userId);
+    if (photoCount >= 5) {
+      return res.status(400).json({
+        error:
+          "Maximum 5 photos par utilisateur. Supprimez-en avant d'en ajouter.",
+      });
+    }
+
+    // Construire l'URL de la photo
+    const photoUrl = `/uploads/${req.file.filename}`;
+
+    // Si c'est la première photo, elle devient photo de profil
+    const isProfile = photoCount === 0;
+
+    const photo = await photoModel.add(req.userId, photoUrl, isProfile);
+
+    const message = isProfile
+      ? "Photo uploadée avec succès et définie comme photo de profil"
+      : "Photo uploadée avec succès";
+
+    res.status(201).json({
+      message: message,
+      photo: photo,
+    });
+  } catch (error) {
+    console.error("Erreur lors de l'upload:", error);
+    res.status(500).json({ error: "Erreur serveur lors de l'upload" });
+  }
+};
+
+// Récupérer les photos d'un utilisateur
+const getUserPhotos = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = parseInt(id);
+
+    if (isNaN(userId)) {
+      return res.status(400).json({ error: "ID utilisateur invalide" });
+    }
+
+    // Vérifier si l'utilisateur existe
+    const user = await userModel.findById(userId);
+    if (!user) {
+      return res.status(404).json({ error: "Utilisateur non trouvé" });
+    }
+
+    const photos = await photoModel.getUserPhotos(userId);
+    res.json(photos);
+  } catch (error) {
+    console.error("Erreur:", error);
+    res.status(500).json({ error: "Erreur serveur" });
+  }
+};
+
+// Récupérer mes photos
+const getMyPhotos = async (req, res) => {
+  try {
+    const photos = await photoModel.getUserPhotos(req.userId);
+    res.json(photos);
+  } catch (error) {
+    console.error("Erreur:", error);
+    res.status(500).json({ error: "Erreur serveur" });
+  }
+};
+
+// Définir la photo de profil
+const setProfilePhoto = async (req, res) => {
+  try {
+    const { photoId } = req.params;
+
+    const result = await photoModel.setProfile(req.userId, parseInt(photoId));
+
+    if (!result) {
+      return res.status(404).json({ error: "Photo non trouvée" });
+    }
+
+    res.json({ message: "Photo de profil mise à jour" });
+  } catch (error) {
+    console.error("Erreur:", error);
+    res.status(500).json({ error: "Erreur serveur" });
+  }
+};
+
+// Supprimer une photo
+const deletePhoto = async (req, res) => {
+  try {
+    const { photoId } = req.params;
+    const parsedId = parseInt(photoId);
+
+    if (isNaN(parsedId)) {
+      return res.status(400).json({ error: "ID de photo invalide" });
+    }
+
+    const deletedPhoto = await photoModel.delete(parsedId, req.userId);
+
+    if (!deletedPhoto) {
+      return res
+        .status(404)
+        .json({ error: "Photo non trouvée" });
+    }
+
+    const message = "Photo supprimée";
+
+    res.json({ message });
+  } catch (error) {
+    console.error("Erreur lors de la suppression:", error);
+    res.status(500).json({ error: "Erreur serveur lors de la suppression" });
+  }
+};
+
+module.exports = {
+  uploadPhoto,
+  getUserPhotos,
+  getMyPhotos,
+  setProfilePhoto,
+  deletePhoto,
+  handleMulterError,
+};
+
+
+=== FILE: ./backend/src/controllers/profileController.js ===
+
+const {
+  user: userModel,
+  visit: visitModel,
+  notification: notificationModel,
+  block: blockModel,
+} = require("../models");
+
+// Récupérer son propre profil
+const getMyProfile = async (req, res) => {
+  try {
+    const user = await userModel.findById(req.userId);
+
+    if (!user) {
+      return res.status(404).json({ error: "Utilisateur non trouvé" });
+    }
+
+    // Ne pas renvoyer le mot de passe
+    const { password_hash, ...userWithoutPassword } = user;
+
+    res.json(userWithoutPassword);
+  } catch (error) {
+    console.error("Erreur lors de la récupération du profil:", error);
+    res.status(500).json({ error: "Erreur serveur" });
+  }
+};
+
+// Récupérer le profil d'un autre utilisateur
+const getUserProfile = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = parseInt(id);
+
+    if (isNaN(userId)) {
+      return res.status(400).json({ error: "ID invalide" });
+    }
+
+    const user = await userModel.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({ error: "Utilisateur non trouvé" });
+    }
+
+    // Verifier si l'utilisateur est bloqué ou a bloqué
+    const blockedHim = await blockModel.isBlocked(req.userId, userId);
+    const blockedByHim = await blockModel.isBlocked(userId, req.userId);
+
+    if (blockedHim || blockedByHim) {
+      return res.status(403).json({ error: "Vous ne pouvez pas consulter ce profil" });
+    }
+
+    // Enregistrer la visite
+    await visitModel.add(req.userId, userId);
+
+    // Créer une notification de visite
+    const visitor = await userModel.findById(req.userId);
+    const notification = await notificationModel.create(
+      userId, // visited_id
+      "visit",
+      req.userId, // visitor_id
+      `${visitor.username} a consulté votre profil`,
+      { visited: true },
+    );
+
+    const io = global.io;
+    if (!io) {
+      const error = new Error("Socket.io not initialized");
+      error.code = "SOCKET_IO_NOT_INITIALIZED";
+      throw error;
+    }
+    io.to(`user:${userId}`).emit("notification", notification);
+
+    // Ne pas renvoyer le mot de passe
+    const { password_hash, ...userWithoutPassword } = user;
+
+    res.json(userWithoutPassword);
+  } catch (error) {
+    console.error("Erreur lors de la récupération du profil:", error);
+    res.status(500).json({ error: "Erreur serveur" });
+  }
+};
+
+// Voir mes visiteurs
+const getMyVisitors = async (req, res) => {
+  try {
+    const visitors = await visitModel.getMyVisitors(req.userId);
+    res.json(visitors);
+  } catch (error) {
+    console.error("Erreur:", error);
+    res.status(500).json({ error: "Erreur serveur" });
+  }
+};
+
+// Modifier son profil
+const updateProfile = async (req, res) => {
+  try {
+    const allowedUpdates = [
+      "firstName",
+      "lastName",
+      "email",
+      "bio",
+      "gender",
+      "sexualPreferences",
+      "locationCity",
+      "birthDate",
+    ];
+    const updates = {};
+
+    for (const field of allowedUpdates) {
+      if (req.body[field] !== undefined) {
+        const dbField = field.replace(
+          /[A-Z]/g,
+          (letter) => `_${letter.toLowerCase()}`,
+        );
+        updates[dbField] = req.body[field];
+      }
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: "Aucune donnée à mettre à jour" });
+    }
+
+    // Vérifier si l'email est déjà utilisé par un autre utilisateur
+    if (updates.email) {
+      const existingUser = await userModel.findByEmail(updates.email);
+      if (existingUser && existingUser.id !== req.userId) {
+        return res.status(400).json({ error: "Cet email est déjà utilisé" });
+      }
+    }
+
+    const updatedUser = await userModel.updateProfile(req.userId, updates);
+
+    if (!updatedUser) {
+      return res.status(404).json({ error: "Utilisateur non trouvé" });
+    }
+
+    res.json({
+      message: "Profil mis à jour avec succès",
+      user: updatedUser,
+    });
+  } catch (error) {
+    console.error("Erreur lors de la mise à jour du profil:", error);
+    res.status(500).json({ error: "Erreur serveur" });
+  }
+};
+
+module.exports = { getMyProfile, getUserProfile, updateProfile, getMyVisitors };
+
+
+=== FILE: ./backend/src/controllers/searchController.js ===
+
+const { search: searchModel } = require('../models');
+
+const searchUsers = async (req, res) => {
+  try {
+    const filters = {
+      ageMin: req.query.ageMin ? parseInt(req.query.ageMin) : null,
+      ageMax: req.query.ageMax ? parseInt(req.query.ageMax) : null,
+      preferences: req.query.preferences ? [req.query.preferences] : null,
+      latitude: req.query.latitude ? parseFloat(req.query.latitude) : null,
+      longitude: req.query.longitude ? parseFloat(req.query.longitude) : null,
+      distance: req.query.distance ? parseFloat(req.query.distance) : null,
+      popularityMin: req.query.popularityMin ? parseFloat(req.query.popularityMin) : null,
+      popularityMax: req.query.popularityMax ? parseFloat(req.query.popularityMax) : null,
+      tags: req.query.tags ? req.query.tags.split(',') : null,
+      orderBy: req.query.orderBy || 'popularity_score',
+      orderDirection: req.query.orderDirection || 'DESC',
+      limit: req.query.limit ? Math.max(1, parseInt(req.query.limit)) : 20,
+      offset: req.query.offset ? Math.max(0, parseInt(req.query.offset)) : 0
+    };
+    
+    const users = await searchModel.searchUsers(filters, req.userId);
+    
+    res.json({
+      users,
+      filters,
+      count: users.length
+    });
+  } catch (error) {
+    console.error('Erreur lors de la recherche:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+};
+
+const getSuggestions = async (req, res) => {
+  try {
+    const limit = req.query.limit ? parseInt(req.query.limit) : 20;
+    const suggestions = await searchModel.getSuggestions(req.userId, limit);
+    
+    res.json({
+      suggestions,
+      count: suggestions.length
+    });
+  } catch (error) {
+    console.error('Erreur lors de la récupération des suggestions:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+};
+
+module.exports = { searchUsers, getSuggestions };
+
+
+=== FILE: ./backend/src/controllers/tagController.js ===
+
+const { user: userModel, tag: tagModel } = require('../models');
+
+const getAllTags = async (req, res) => {
+  try {
+    const tags = await tagModel.getAll();
+    res.json(tags);
+  } catch (error) {
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+};
+
+const getMyTags = async (req, res) => {
+  try {
+    const tags = await tagModel.getUserTags(req.userId);
+    res.json(tags);
+  } catch (error) {
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+};
+
+const addTag = async (req, res) => {
+  try {
+    const { tagName } = req.body;
+    
+    if (!tagName) {
+      return res.status(400).json({ error: 'tagName requis' });
+    }
+    
+    const normalizedTagName = tagName.trim().toLowerCase();
+
+    if (!/^[a-z0-9]+$/.test(normalizedTagName)) {
+      return res.status(400).json({ error: 'Le tag ne doit contenir que des lettres et des chiffres, sans espace ni ponctuation.' });
+    }
+    
+    let tag = await tagModel.findByName(normalizedTagName);
+    if (!tag) {
+      tag = await tagModel.create(normalizedTagName);
+    }
+    
+    const result = await tagModel.addToUser(req.userId, tag.id);
+    
+    if (!result) {
+      return res.status(400).json({ error: 'Tag déjà ajouté' });
+    }
+    
+    res.json({ message: `Tag "${normalizedTagName}" ajouté avec succès` });
+  } catch (error) {
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+};
+
+const removeTag = async (req, res) => {
+  try {
+    const { tagName } = req.params;
+    
+    if (!tagName) {
+      return res.status(400).json({ error: 'tagName requis' });
+    }
+    
+    const tag = await tagModel.findByName(tagName);
+    
+    if (!tag) {
+      return res.status(404).json({ error: 'Tag non trouvé' });
+    }
+    
+    const result = await tagModel.removeFromUser(req.userId, tag.id);
+    
+    if (!result) {
+      return res.status(404).json({ error: 'Tag non trouvé sur ce profil' });
+    }
+    
+    res.json({ message: `Tag "${tagName}" supprimé avec succès` });
+  } catch (error) {
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+};
+
+const getUserTags = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = parseInt(id);
+    
+    if (isNaN(userId)) {
+      return res.status(400).json({ error: 'ID utilisateur invalide' });
+    }
+    
+    const user = await userModel.findById(userId);
+    if (!user) {
+      return res.status(404).json({ error: 'Utilisateur non trouvé' });
+    }
+    
+    const tags = await tagModel.getUserTags(userId);
+    res.json(tags);
+  } catch (error) {
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+};
+
+module.exports = { getAllTags, getMyTags, addTag, removeTag, getUserTags };
+
+=== FILE: ./backend/src/controllers/reportController.js ===
+
+const { report } = require('../models');
+
+const reportUser = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const reportedId = parseInt(userId);
+
+    if (isNaN(reportedId)) {
+      return res.status(400).json({ error: 'ID utilisateur invalide' });
+    }
+
+    if (reportedId === req.userId) {
+      return res.status(400).json({ error: 'Vous ne pouvez pas vous signaler vous-même' });
+    }
+
+    const result = await report.add(req.userId, reportedId);
+
+    if (!result) {
+      return res.status(400).json({ error: 'Vous avez déjà signalé cet utilisateur' });
+    }
+
+    res.json({ message: 'L\'utilisateur a été signalé à nos équipes avec succès.' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+};
+
+module.exports = { reportUser };
+
+=== FILE: ./backend/src/db/initDb.js ===
+
+const fs = require("fs");
+const path = require("path");
+const { Client } = require("pg");
+require("dotenv").config();
+
+// Configuration pour se connecter à PostgreSQL
+const config = {
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  host: process.env.DB_HOST,
+  port: process.env.DB_PORT,
+  database: "postgres",
+};
+
+const initDatabase = async () => {
+  let client;
+
+  try {
+    client = new Client(config);
+    await client.connect();
+
+    await client.query("DROP DATABASE IF EXISTS matcha;");
+    await client.query("CREATE DATABASE matcha;");
+
+    await client.end();
+
+    config.database = "matcha";
+    client = new Client(config);
+    await client.connect();
+
+    const files = [
+      "schema/users.sql",
+      "schema/tags.sql",
+      "schema/user_tags.sql",
+      "schema/photos.sql",
+      "schema/blocks.sql",
+      'schema/likes.sql',
+      'schema/visits.sql',
+      'schema/messages.sql',
+      'schema/notifications.sql',
+      'schema/reports.sql',
+      "seeds/tags_seed.sql",
+    ];
+
+    for (const file of files) {
+      const filePath = path.join(__dirname, file);
+      const sql = fs.readFileSync(filePath, "utf8");
+      await client.query(sql);
+    }
+
+    // Supprimer uploads
+    const uploadsDir = path.join(__dirname, "../../", "uploads");
+    if (fs.existsSync(uploadsDir)) {
+      fs.rmSync(uploadsDir, { recursive: true, force: true });
+    }
+  } catch (error) {
+    console.error("Erreur: ", error);
+  } finally {
+    if (client) await client.end();
+  }
+};
+
+initDatabase();
+
+
+=== FILE: ./backend/src/db/pool.js ===
+
+const { Pool } = require("pg");
+
+// Détecte si on est en mode Docker ou local
+const isDocker =
+  process.env.DB_HOST === "postgres" || process.env.DOCKER_ENV === "true";
+
+const pool = new Pool({
+  user: process.env.DB_USER || "postgres",
+  password: process.env.DB_PASSWORD || "postgres",
+  host: process.env.DB_HOST || (isDocker ? "postgres" : "localhost"),
+  port: parseInt(process.env.DB_PORT) || 5432,
+  database: process.env.DB_NAME || "matcha",
+});
+
+pool.connect((err, client, release) => {
+  if (err) {
+    console.error("❌ Erreur de connexion à PostgreSQL:", err.message);
+  } else {
+    release();
+  }
+});
+
+module.exports = pool;
+
+
+=== FILE: ./backend/src/db/seed.js ===
+
+const pool = require('./pool');
+const bcrypt = require('bcrypt');
+require('dotenv').config();
+
+// ==================== DONNÉES FACTICES ====================
+
+const firstNames = [
+  'Jean', 'Marie', 'Pierre', 'Sophie', 'Thomas', 'Julie', 'Nicolas', 'Laura',
+  'David', 'Emma', 'Lucas', 'Chloé', 'Alexandre', 'Camille', 'Maxime', 'Manon',
+  'Antoine', 'Sarah', 'Kevin', 'Marine', 'Julien', 'Mathilde', 'Romain', 'Léa',
+  'Florent', 'Lucie', 'Vincent', 'Pauline', 'Guillaume', 'Alice', 'Baptiste', 'Jeanne',
+  'Louis', 'Jeanne', 'Charles', 'Victoire', 'Henri', 'Marguerite', 'François', 'Catherine',
+  'James', 'Mary', 'John', 'Patricia', 'Robert', 'Jennifer', 'Michael', 'Linda',
+  'William', 'Elizabeth', 'Richard', 'Susan', 'Joseph', 'Jessica', 'Thomas', 'Sarah'
+];
+
+const lastNames = [
+  'Dupont', 'Martin', 'Bernard', 'Dubois', 'Thomas', 'Robert', 'Richard', 'Petit',
+  'Durand', 'Leroy', 'Moreau', 'Simon', 'Laurent', 'Michel', 'Garcia', 'David',
+  'Bertrand', 'Roux', 'Vincent', 'Fournier', 'Morel', 'Girard', 'Andre', 'Lefevre',
+  'Mercier', 'Dupuis', 'Lambert', 'Benoit', 'Rousseau', 'Blanc', 'Guerin', 'Molinier',
+  'Smith', 'Johnson', 'Williams', 'Brown', 'Jones', 'Garcia', 'Miller', 'Davis',
+  'Rodriguez', 'Martinez', 'Hernandez', 'Lopez', 'Gonzalez', 'Wilson', 'Anderson', 'Taylor'
+];
+
+const cities = [
+  { name: 'Paris', lat: 48.8566, lng: 2.3522 },
+  { name: 'Marseille', lat: 43.2965, lng: 5.3698 },
+  { name: 'Lyon', lat: 45.7640, lng: 4.8357 },
+  { name: 'Toulouse', lat: 43.6047, lng: 1.4442 },
+  { name: 'Nice', lat: 43.7102, lng: 7.2620 },
+  { name: 'Nantes', lat: 47.2184, lng: -1.5536 },
+  { name: 'Strasbourg', lat: 48.5734, lng: 7.7521 },
+  { name: 'Montpellier', lat: 43.6108, lng: 3.8767 },
+  { name: 'Bordeaux', lat: 44.8378, lng: -0.5792 },
+  { name: 'Lille', lat: 50.6292, lng: 3.0573 },
+  { name: 'Rennes', lat: 48.1173, lng: -1.6778 },
+  { name: 'Reims', lat: 49.2583, lng: 4.0317 },
+  { name: 'Le Havre', lat: 49.4944, lng: 0.1079 },
+  { name: 'Saint-Étienne', lat: 45.4397, lng: 4.3872 },
+  { name: 'Toulon', lat: 43.1242, lng: 5.9280 },
+  { name: 'Grenoble', lat: 45.1885, lng: 5.7245 },
+  { name: 'Dijon', lat: 47.3220, lng: 5.0415 },
+  { name: 'Angers', lat: 47.4784, lng: -0.5632 },
+  { name: 'Nîmes', lat: 43.8367, lng: 4.3601 },
+  { name: 'Villeurbanne', lat: 45.7719, lng: 4.8902 }
+];
+
+const bios = [
+  'Passionné(e) de café et de nouvelles rencontres !',
+  'Amoureux(se) des voyages et des découvertes.',
+  'Sportif(ve) dans l\'âme, à la recherche d\'une partenaire de running.',
+  'Geek et fier de l\'être. Code, café et chats.',
+  'Artiste dans l\'âme, je peins mes émotions.',
+  'Cuisinier(ère) amateur, je teste de nouvelles recettes chaque semaine.',
+  'Plutôt bière que café, mais ouvert à tout.',
+  'À la recherche de l\'âme sœur pour partager des moments simples.',
+  'Vegan et écolo, je veux changer le monde.',
+  'Musicien(ne), je joue de la guitare et cherche ma muse.',
+  'Cinéphile, passionné(e) de films indépendants.',
+  'Lecteur(trice) invétéré, toujours un livre dans mon sac.',
+  'Barista en herbe, je fais le meilleur café de la ville.',
+  'Yogi, je médite et cherche l\'équilibre.',
+  'Entrepreneur(se), je construis mon empire.',
+  'Fêtard(e), j\'adore sortir et danser.',
+  'Calme et réservé(e), j\'ai besoin de temps pour m\'ouvrir.',
+  'Extraverti(e) et sociable, je connais tout le monde.',
+  'Fleur bleue, je crois encore au grand amour.',
+  'Pragmatique, je cherche une relation sérieuse.'
+];
+
+const genders = ['male', 'female', 'other'];
+const sexualPreferences = ['male', 'female', 'bisexual'];
+
+// ==================== FONCTIONS UTILITAIRES ====================
+
+function randomInt(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+function randomItem(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+function randomBirthDate() {
+  const age = randomInt(18, 80);
+  const year = new Date().getFullYear() - age;
+  const month = randomInt(0, 11);
+  const day = randomInt(1, 28);
+  return new Date(year, month, day).toISOString().split('T')[0];
+}
+
+function randomDate() {
+  const start = new Date(2023, 0, 1);
+  const end = new Date();
+  return new Date(start.getTime() + Math.random() * (end.getTime() - start.getTime()));
+}
+
+// ==================== GÉNÉRATION DE PHOTOS ====================
+
+function getRandomPhotoUrl(gender, number) {
+  const genderFolder = gender === 'male' ? 'men' : (gender === 'female' ? 'women' : (randomInt(0, 1) === 0 ? 'men' : 'women'));
+  return `https://randomuser.me/api/portraits/${genderFolder}/${number}.jpg`;
+}
+
+// ==================== RÉCUPÉRATION DES TAGS ====================
+
+async function getExistingTags() {
+  const result = await pool.query('SELECT id, name FROM tags');
+  return result.rows;
+}
+
+// ==================== GÉNÉRATION DES UTILISATEURS ====================
+
+async function generateUsers(count, existingTags) {
+  const hashedPassword = await bcrypt.hash('Test123!', 10);
+  const users = [];
+
+  for (let i = 0; i < count; i++) {
+    const firstName = randomItem(firstNames);
+    const lastName = randomItem(lastNames);
+    const username = `${firstName.toLowerCase()}${lastName.toLowerCase()}${randomInt(1, 999)}`;
+    const email = `${username}@matcha-test.com`;
+    const gender = randomItem(genders);
+    const sexualPref = randomItem(sexualPreferences);
+    const bio = randomItem(bios);
+    const city = randomItem(cities);
+    const birthDate = randomBirthDate();
+    const locationManual = Math.random() > 0.3;
+    const isVerified = true;
+    const popularityScore = randomInt(0, 100);
+    const lastSeen = randomDate();
+    const createdAt = randomDate();
+    const updatedAt = new Date();
+
+    // Insérer l'utilisateur
+    const result = await pool.query(
+      `INSERT INTO users 
+       (username, email, password_hash, first_name, last_name, 
+        gender, sexual_preferences, bio, location_city, 
+        latitude, longitude, location_manual, birth_date,
+        is_verified, popularity_score, last_seen, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+       RETURNING id`,
+      [
+        username, email, hashedPassword, firstName, lastName,
+        gender, sexualPref, bio, city.name,
+        locationManual ? null : city.lat,
+        locationManual ? null : city.lng,
+        locationManual,
+        birthDate, isVerified, popularityScore, lastSeen, createdAt, updatedAt
+      ]
+    );
+
+    const userId = result.rows[0].id;
+    users.push(userId);
+
+    // Ajouter des tags aléatoires (2-5 tags)
+    const numTags = randomInt(2, 5);
+    const shuffledTags = [...existingTags].sort(() => 0.5 - Math.random());
+    for (let j = 0; j < numTags && j < shuffledTags.length; j++) {
+      await pool.query(
+        'INSERT INTO user_tags (user_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+        [userId, shuffledTags[j].id]
+      );
+    }
+
+    // Ajouter des photos (1-5 photos) avec is_external = true
+    const numPhotos = randomInt(1, 5);
+    for (let j = 0; j < numPhotos; j++) {
+      const isProfile = j === 0;
+      const randomNum = randomInt(0, 99);
+      const photoUrl = getRandomPhotoUrl(gender, randomNum);
+      
+      await pool.query(
+        `INSERT INTO photos (user_id, url, is_profile, is_external, created_at)
+         VALUES ($1, $2, $3, true, NOW())`,
+        [userId, photoUrl, isProfile]
+      );
+    }
+
+    if ((i + 1) % 50 === 0) {
+    }
+  }
+
+  return users;
+}
+
+// ==================== MAIN ====================
+
+async function seed() {
+  try {
+
+    
+    await pool.query('TRUNCATE TABLE user_tags, photos, likes, visits, messages, notifications, blocks, users CASCADE');
+
+    const existingTags = await getExistingTags();
+
+    const users = await generateUsers(500, existingTags);
+
+    const totalUsers = await pool.query('SELECT COUNT(*) as total FROM users');
+    const usersWithPhotos = await pool.query('SELECT COUNT(DISTINCT user_id) as total FROM photos');
+    const usersWithTags = await pool.query('SELECT COUNT(DISTINCT user_id) as total FROM user_tags');
+  } catch (error) {
+    console.error('❌ Erreur lors du seeding:', error);
+  } finally {
+    await pool.end();
+  }
+}
+
+seed();
+
+=== FILE: ./backend/src/middlewares/authMiddleware.js ===
+
+const jwt = require('jsonwebtoken');
+
+const authMiddleware = (req, res, next) => {
+  // Récupérer le token du header Authorization
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Token manquant ou invalide' });
+  }
+
+  const token = authHeader.split(' ')[1];
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.userId = decoded.userId;
+    req.username = decoded.username;
+    next();
+  } catch (error) {
+    return res.status(401).json({ error: 'Token invalide ou expiré' });
+  }
+};
+
+module.exports = authMiddleware;
+
+
+=== FILE: ./backend/src/middlewares/uploadMiddleware.js ===
+
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+
+// Fonction pour vérifier/créer le dossier uploads
+const ensureUploadDirExists = () => {
+  const uploadDir = path.join(__dirname, '../../uploads');
+  if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+  }
+  return uploadDir;
+};
+
+// Configuration du stockage
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadDir = ensureUploadDirExists();
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const ext = path.extname(file.originalname);
+    cb(null, `user-${req.userId}-${uniqueSuffix}${ext}`);
+  }
+});
+
+// Filtre pour n'accepter que les images
+const fileFilter = (req, file, cb) => {
+  const allowedTypes = /jpeg|jpg|png|gif/;
+  const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+  const mimetype = allowedTypes.test(file.mimetype);
+  
+  if (mimetype && extname) {
+    cb(null, true);
+  } else {
+    cb(new Error('Seules les images sont autorisées (jpeg, jpg, png, gif)'));
+  }
+};
+
+const upload = multer({
+  storage: storage,
+  limits: { 
+    fileSize: 5 * 1024 * 1024, // 5MB max
+    files: 1
+  },
+  fileFilter: fileFilter
+});
+
+module.exports = upload;
+
+=== FILE: ./backend/src/models/blockModel.js ===
+
+const pool = require("../db/pool");
+const {like: likeModel} = require("./likeModel");
+
+const blockModel = {
+  // Bloquer un utilisateur
+  async add(blockerId, blockedId) {
+    // Vérifier si déjà bloqué
+    const existing = await pool.query(
+      "SELECT * FROM blocks WHERE blocker_id = $1 AND blocked_id = $2",
+      [blockerId, blockedId],
+    );
+
+    if (existing.rows.length > 0) {
+      return null;
+    }
+
+    // Ajouter le blocage
+    const result = await pool.query(
+      "INSERT INTO blocks (blocker_id, blocked_id) VALUES ($1, $2) RETURNING *",
+      [blockerId, blockedId],
+    );
+
+    // Supprimer les likes existants entre les deux utilisateurs
+    await likeModel.remove(blockerId, blockedId);
+    await likeModel.remove(blockedId, blockerId);
+
+    return result.rows[0];
+  },
+
+  // Débloquer un utilisateur
+  async remove(blockerId, blockedId) {
+    const result = await pool.query(
+      "DELETE FROM blocks WHERE blocker_id = $1 AND blocked_id = $2 RETURNING *",
+      [blockerId, blockedId],
+    );
+    return result.rows[0] || null;
+  },
+
+  // Vérifier si un utilisateur est bloqué
+  async isBlocked(userId, targetId) {
+    const result = await pool.query(
+      "SELECT * FROM blocks WHERE blocker_id = $1 AND blocked_id = $2",
+      [userId, targetId],
+    );
+    return result.rows.length > 0;
+  },
+
+  // Récupérer la liste des utilisateurs bloqués
+  async getBlockedUsers(userId) {
+    const result = await pool.query(
+      `SELECT b.*, u.username, u.first_name, u.last_name,
+              (SELECT url FROM photos WHERE user_id = u.id AND is_profile = true) as profile_photo
+       FROM blocks b
+       JOIN users u ON u.id = b.blocked_id
+       WHERE b.blocker_id = $1
+       ORDER BY b.created_at DESC`,
+      [userId],
+    );
+    return result.rows;
+  },
+};
+
+module.exports = blockModel;
+
+
+=== FILE: ./backend/src/models/index.js ===
+
+const userModel = require("./userModel");
+const tagModel = require("./tagModel");
+const photoModel = require("./photoModel");
+const locationModel = require("./locationModel");
+const searchModel = require("./searchModel");
+const likeModel = require("./likeModel");
+const visitModel = require("./visitModel");
+const messageModel = require("./messageModel");
+const notificationModel = require("./notificationModel");
+const blockModel = require("./blockModel");
+const reportModel = require("./reportModel");
+
+module.exports = {
+  user: userModel,
+  tag: tagModel,
+  photo: photoModel,
+  location: locationModel,
+  search: searchModel,
+  like: likeModel,
+  visit: visitModel,
+  message: messageModel,
+  notification: notificationModel,
+  block: blockModel,
+  report: reportModel,
+};
+
+
+=== FILE: ./backend/src/models/likeModel.js ===
+
+const pool = require('../db/pool');
+const notificationModel = require('./notificationModel');
+
+const likeModel = {
+  async updatePopularityScore(userId) {
+    const likesReceived = await this.countReceivedLikes(userId);
+    
+    const matchesResult = await pool.query(
+      `SELECT COUNT(*) FROM (
+        SELECT l1.from_user_id 
+        FROM likes l1
+        JOIN likes l2 ON l1.from_user_id = l2.to_user_id AND l1.to_user_id = l2.from_user_id
+        WHERE l1.to_user_id = $1
+        GROUP BY l1.from_user_id
+      ) AS matches`,
+      [userId]
+    );
+    const matchCount = parseInt(matchesResult.rows[0].count);
+    
+    let score = (likesReceived * 20) + (matchCount * 10);
+    if (score > 1000) score = 1000;
+    
+    await pool.query(
+      'UPDATE users SET popularity_score = $1 WHERE id = $2',
+      [score, userId]
+    );
+    
+    return score;
+  },
+
+  async add(fromUserId, toUserId, io) {
+    const targetUser = await pool.query(
+      'SELECT id, username, first_name, last_name FROM users WHERE id = $1',
+      [toUserId]
+    );
+    
+    if (targetUser.rows.length === 0) {
+      const error = new Error('Utilisateur cible inexistant');
+      error.code = 'USER_NOT_FOUND';
+      throw error;
+    }
+    
+    const photoCheck = await pool.query(
+      'SELECT id FROM photos WHERE user_id = $1 AND is_profile = true',
+      [fromUserId]
+    );
+    
+    if (photoCheck.rows.length === 0) {
+      const error = new Error('Vous devez avoir une photo de profil pour liker');
+      error.code = 'NO_PROFILE_PHOTO';
+      throw error;
+    }
+    
+    const existing = await pool.query(
+      'SELECT * FROM likes WHERE from_user_id = $1 AND to_user_id = $2',
+      [fromUserId, toUserId]
+    );
+    
+    if (existing.rows.length > 0) {
+      const error = new Error('Like déjà existant');
+      error.code = 'LIKE_ALREADY_EXISTS';
+      throw error;
+    }
+    
+    const blockCheck = await pool.query(
+      'SELECT * FROM blocks WHERE (blocker_id = $1 AND blocked_id = $2) OR (blocker_id = $2 AND blocked_id = $1)',
+      [fromUserId, toUserId]
+    );
+    
+    if (blockCheck.rows.length > 0) {
+      const error = new Error('Vous ne pouvez pas liker cet utilisateur');
+      error.code = 'BLOCKED';
+      throw error;
+    }
+    
+    const fromUser = await pool.query(
+      'SELECT id, username, first_name, last_name FROM users WHERE id = $1',
+      [fromUserId]
+    );
+    
+    const result = await pool.query(
+      'INSERT INTO likes (from_user_id, to_user_id) VALUES ($1, $2) RETURNING *',
+      [fromUserId, toUserId]
+    );
+    
+    const likeNotification = await notificationModel.create(
+      toUserId,
+      'like',
+      fromUserId,
+      `${fromUser.rows[0].first_name} ${fromUser.rows[0].last_name} vous a liké`,
+      { likeId: result.rows[0].id }
+    );
+    
+    if (io) {
+      io.to(`user:${toUserId}`).emit('notification', likeNotification);
+    }
+    
+    const mutual = await pool.query(
+      'SELECT * FROM likes WHERE from_user_id = $1 AND to_user_id = $2',
+      [toUserId, fromUserId]
+    );
+    
+    const isMatch = mutual.rows.length > 0;
+    
+    if (isMatch && io) {
+      const matchNotification1 = await notificationModel.create(
+        fromUserId,
+        'match',
+        toUserId,
+        `${targetUser.rows[0].first_name} ${targetUser.rows[0].last_name} vous a liké en retour ! C'est un match !`,
+        { match: true }
+      );
+      
+      const matchNotification2 = await notificationModel.create(
+        toUserId,
+        'match',
+        fromUserId,
+        `${fromUser.rows[0].first_name} ${fromUser.rows[0].last_name} vous a liké en retour ! C'est un match !`,
+        { match: true }
+      );
+      
+      io.to(`user:${fromUserId}`).emit('notification', matchNotification1);
+      io.to(`user:${toUserId}`).emit('notification', matchNotification2);
+    }
+    
+    await this.updatePopularityScore(fromUserId);
+    await this.updatePopularityScore(toUserId);
+    
+    return {
+      like: result.rows[0],
+      isMatch
+    };
+  },
+  
+  async remove(fromUserId, toUserId, io) {
+    const wasMatch = await this.isMatch(fromUserId, toUserId);
+    
+    const result = await pool.query(
+      'DELETE FROM likes WHERE from_user_id = $1 AND to_user_id = $2 RETURNING *',
+      [fromUserId, toUserId]
+    );
+    
+    if (result.rows.length > 0 && wasMatch && io) {
+      const fromUser = await pool.query(
+        'SELECT first_name, last_name FROM users WHERE id = $1',
+        [fromUserId]
+      );
+      
+      const unlikeNotification = await notificationModel.create(
+        toUserId,
+        'unlike',
+        fromUserId,
+        `${fromUser.rows[0].first_name} ${fromUser.rows[0].last_name} a retiré son like`,
+        { unlike: true }
+      );
+      
+      io.to(`user:${toUserId}`).emit('notification', unlikeNotification);
+    }
+    
+    await this.updatePopularityScore(fromUserId);
+    await this.updatePopularityScore(toUserId);
+    
+    return result.rows[0] || null;
+  },
+  
+  async exists(fromUserId, toUserId) {
+    const result = await pool.query(
+      'SELECT * FROM likes WHERE from_user_id = $1 AND to_user_id = $2',
+      [fromUserId, toUserId]
+    );
+    return result.rows.length > 0;
+  },
+  
+  async isMatch(userId1, userId2) {
+    const result = await pool.query(
+      'SELECT * FROM likes WHERE (from_user_id = $1 AND to_user_id = $2) OR (from_user_id = $2 AND to_user_id = $1)',
+      [userId1, userId2]
+    );
+    return result.rows.length === 2;
+  },
+  
+  async getReceivedLikes(userId) {
+    const result = await pool.query(
+      `SELECT l.*, u.username, u.first_name, u.last_name,
+              (SELECT url FROM photos WHERE user_id = u.id AND is_profile = true) as profile_photo
+       FROM likes l
+       JOIN users u ON u.id = l.from_user_id
+       WHERE l.to_user_id = $1
+       ORDER BY l.created_at DESC`,
+      [userId]
+    );
+    return result.rows;
+  },
+  
+  async getSentLikes(userId) {
+    const result = await pool.query(
+      `SELECT l.*, u.username, u.first_name, u.last_name,
+              (SELECT url FROM photos WHERE user_id = u.id AND is_profile = true) as profile_photo
+       FROM likes l
+       JOIN users u ON u.id = l.to_user_id
+       WHERE l.from_user_id = $1
+       ORDER BY l.created_at DESC`,
+      [userId]
+    );
+    return result.rows;
+  },
+  
+  async getMatches(userId) {
+    const result = await pool.query(
+      `SELECT DISTINCT u.id, u.username, u.first_name, u.last_name, u.last_seen, u.is_online,
+              (SELECT url FROM photos WHERE user_id = u.id AND is_profile = true) as profile_photo
+       FROM likes l1
+       JOIN likes l2 ON l1.from_user_id = l2.to_user_id AND l1.to_user_id = l2.from_user_id
+       JOIN users u ON (u.id = l1.from_user_id OR u.id = l1.to_user_id)
+       WHERE (l1.from_user_id = $1 OR l1.to_user_id = $1)
+         AND u.id != $1
+       GROUP BY u.id`,
+      [userId]
+    );
+    return result.rows;
+  },
+  
+  async countReceivedLikes(userId) {
+    const result = await pool.query(
+      'SELECT COUNT(*) FROM likes WHERE to_user_id = $1',
+      [userId]
+    );
+    return parseInt(result.rows[0].count);
+  }
+};
+
+module.exports = likeModel;
+
+
+=== FILE: ./backend/src/models/locationModel.js ===
+
+const pool = require("../db/pool");
+
+const locationModel = {
+  // Mettre à jour la localisation GPS
+  async updateGps(userId, latitude, longitude, city = null) {
+    let query;
+    let params;
+
+    if (city) {
+      query = `
+      UPDATE users 
+      SET latitude = $1, longitude = $2, location_city = $3, location_manual = FALSE, updated_at = NOW()
+      WHERE id = $4
+      RETURNING id, latitude, longitude, location_city, location_manual
+    `;
+      params = [latitude, longitude, city, userId];
+    } else {
+      query = `
+      UPDATE users 
+      SET latitude = $1, longitude = $2, location_manual = FALSE, updated_at = NOW()
+      WHERE id = $3
+      RETURNING id, latitude, longitude, location_city, location_manual
+    `;
+      params = [latitude, longitude, userId];
+    }
+
+    const result = await pool.query(query, params);
+    return result.rows[0] || null;
+  },
+
+  // Mettre à jour la localisation manuelle
+  async updateManual(userId, city) {
+    const result = await pool.query(
+      `UPDATE users 
+       SET location_city = $1, location_manual = TRUE, latitude = NULL, longitude = NULL, updated_at = NOW()
+       WHERE id = $2
+       RETURNING id, latitude, longitude, location_city, location_manual`,
+      [city, userId],
+    );
+    return result.rows[0] || null;
+  },
+
+  // Récupérer la localisation d'un utilisateur
+  async getUserLocation(userId) {
+    const result = await pool.query(
+      `SELECT latitude, longitude, location_city, location_manual 
+       FROM users WHERE id = $1`,
+      [userId],
+    );
+    return result.rows[0] || null;
+  },
+
+  // Désactiver la localisation
+  async disable(userId) {
+    const result = await pool.query(
+      `UPDATE users 
+       SET latitude = NULL, longitude = NULL, location_city = NULL, location_manual = FALSE, updated_at = NOW()
+       WHERE id = $1
+       RETURNING id, latitude, longitude, location_city, location_manual`,
+      [userId],
+    );
+    return result.rows[0] || null;
+  },
+};
+
+module.exports = locationModel;
+
+
+=== FILE: ./backend/src/models/messageModel.js ===
+
+const pool = require('../db/pool');
+const blockModel = require('./blockModel');
+
+const messageModel = {
+  // Envoyer un message
+  async send(fromUserId, toUserId, content) {
+    // Insérer le message
+    const result = await pool.query(
+      `INSERT INTO messages (from_user_id, to_user_id, content)
+       VALUES ($1, $2, $3)
+       RETURNING id, from_user_id, to_user_id, content, is_read, created_at`,
+      [fromUserId, toUserId, content]
+    );
+    
+    return result.rows[0];
+  },
+  
+  // Récupérer les messages entre deux utilisateurs
+  async getConversation(userId1, userId2, limit = 50, offset = 0) {
+    const result = await pool.query(
+      `SELECT id, from_user_id, to_user_id, content, is_read, created_at
+       FROM messages
+       WHERE (from_user_id = $1 AND to_user_id = $2)
+          OR (from_user_id = $2 AND to_user_id = $1)
+       ORDER BY created_at DESC
+       LIMIT $3 OFFSET $4`,
+      [userId1, userId2, limit, offset]
+    );
+    return result.rows.reverse(); // Retourner dans l'ordre chronologique
+  },
+  
+  // Marquer les messages comme lus
+  async markAsRead(userId, fromUserId) {
+    await pool.query(
+      `UPDATE messages 
+       SET is_read = true 
+       WHERE from_user_id = $1 AND to_user_id = $2 AND is_read = false`,
+      [fromUserId, userId]
+    );
+  },
+  
+  // Compter les messages non lus
+  async countUnread(userId) {
+    const result = await pool.query(
+      `SELECT COUNT(*) FROM messages 
+       WHERE to_user_id = $1 AND is_read = false`,
+      [userId]
+    );
+    return parseInt(result.rows[0].count);
+  },
+  
+  // Récupérer la liste des conversations
+  async getConversations(userId) {
+    const result = await pool.query(
+      `SELECT 
+         u.id as user_id, u.username, u.first_name, u.last_name,
+         (SELECT url FROM photos WHERE user_id = u.id AND is_profile = true) as profile_photo,
+         m.content as last_message,
+         m.created_at as last_message_at,
+         (SELECT COUNT(*) FROM messages WHERE to_user_id = $1 AND from_user_id = u.id AND is_read = false) as unread_count
+       FROM users u
+       JOIN (
+         SELECT DISTINCT ON (other_user) other_user, content, created_at
+         FROM (
+           SELECT 
+             CASE 
+               WHEN from_user_id = $1 THEN to_user_id
+               ELSE from_user_id
+             END as other_user,
+             content,
+             created_at
+           FROM messages
+           WHERE from_user_id = $1 OR to_user_id = $1
+           ORDER BY other_user, created_at DESC
+         ) sub
+       ) m ON m.other_user = u.id
+       WHERE u.id IN (
+         SELECT 
+           CASE 
+             WHEN from_user_id = $1 THEN to_user_id
+             ELSE from_user_id
+           END
+         FROM likes l1
+         JOIN likes l2 ON l1.from_user_id = l2.to_user_id AND l1.to_user_id = l2.from_user_id
+         WHERE l1.from_user_id = $1 OR l1.to_user_id = $1
+       )
+       ORDER BY m.created_at DESC`,
+      [userId]
+    );
+    return result.rows;
+  }
+};
+
+module.exports = messageModel;
+
+
+=== FILE: ./backend/src/models/notificationModel.js ===
+
+const pool = require('../db/pool');
+
+const notificationModel = {
+  // Créer une notification
+  async create(userId, type, fromUserId, content, metadata = {}) {
+    const result = await pool.query(
+      `INSERT INTO notifications (user_id, type, from_user_id, content, metadata)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING *`,
+      [userId, type, fromUserId, content, metadata]
+    );
+    return result.rows[0];
+  },
+  
+  // Récupérer les notifications d'un utilisateur (non lues d'abord)
+  async getUserNotifications(userId, limit = 50) {
+    const result = await pool.query(
+      `SELECT n.*, u.username, u.first_name, u.last_name,
+              (SELECT url FROM photos WHERE user_id = u.id AND is_profile = true) as profile_photo
+       FROM notifications n
+       JOIN users u ON u.id = n.from_user_id
+       WHERE n.user_id = $1
+       ORDER BY n.is_read ASC, n.created_at DESC
+       LIMIT $2`,
+      [userId, limit]
+    );
+    return result.rows;
+  },
+  
+  // Marquer une notification comme lue
+  async markAsRead(notificationId, userId) {
+    await pool.query(
+      'UPDATE notifications SET is_read = true WHERE id = $1 AND user_id = $2',
+      [notificationId, userId]
+    );
+  },
+  
+  // Marquer toutes les notifications comme lues
+  async markAllAsRead(userId) {
+    await pool.query(
+      'UPDATE notifications SET is_read = true WHERE user_id = $1 AND is_read = false',
+      [userId]
+    );
+  },
+  
+  // Compter les notifications non lues
+  async countUnread(userId) {
+    const result = await pool.query(
+      'SELECT COUNT(*) FROM notifications WHERE user_id = $1 AND is_read = false',
+      [userId]
+    );
+    return parseInt(result.rows[0].count);
+  },
+  
+  // Supprimer une notification
+  async delete(notificationId, userId) {
+    const result = await pool.query(
+      'DELETE FROM notifications WHERE id = $1 AND user_id = $2 RETURNING *',
+      [notificationId, userId]
+    );
+    return result.rows[0] || null;
+  },
+  
+  // Nettoyer les anciennes notifications (plus de 30 jours)
+  async cleanOldNotifications(days = 30) {
+    await pool.query(
+      "DELETE FROM notifications WHERE created_at < NOW() - ($1 * INTERVAL '1 day')",
+      [days]
+    );
+  }
+};
+
+module.exports = notificationModel;
+
+
+=== FILE: ./backend/src/models/photoModel.js ===
+
+const pool = require('../db/pool');
+const fs = require('fs');
+const path = require('path');
+
+const photoModel = {
+  // Ajouter une photo
+  async add(userId, url, isProfile = false, isExternal = false) {
+    if (isProfile) {
+      await pool.query(
+        'UPDATE photos SET is_profile = false WHERE user_id = $1',
+        [userId]
+      );
+    }
+    
+    const result = await pool.query(
+      `INSERT INTO photos (user_id, url, is_profile, is_external)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id, user_id, url, is_profile, is_external, created_at`,
+      [userId, url, isProfile, isExternal]
+    );
+    
+    return result.rows[0];
+  },
+
+  // Récupérer toutes les photos d'un utilisateur
+  async getUserPhotos(userId) {
+    const result = await pool.query(
+      'SELECT id, url, is_profile, is_external, created_at FROM photos WHERE user_id = $1 ORDER BY id',
+      [userId]
+    );
+    return result.rows;
+  },
+
+  // Récupérer une photo par son ID
+  async findById(photoId, userId = null) {
+    let query = 'SELECT id, url, is_profile, is_external, user_id FROM photos WHERE id = $1';
+    const params = [photoId];
+    
+    if (userId) {
+      query += ' AND user_id = $2';
+      params.push(userId);
+    }
+    
+    const result = await pool.query(query, params);
+    return result.rows[0] || null;
+  },
+
+  // Définir la photo de profil
+  async setProfile(userId, photoId) {
+    const photo = await this.findById(photoId, userId);
+    if (!photo) {
+      throw new Error('Photo non trouvée');
+    }
+    
+    await pool.query(
+      'UPDATE photos SET is_profile = false WHERE user_id = $1',
+      [userId]
+    );
+    
+    await pool.query(
+      'UPDATE photos SET is_profile = true WHERE id = $1 AND user_id = $2',
+      [photoId, userId]
+    );
+    
+    return { success: true };
+  },
+
+  // Supprimer une photo
+  async delete(photoId, userId) {
+    const photo = await this.findById(photoId, userId);
+    if (!photo) return null;
+    
+    await pool.query(
+      'DELETE FROM photos WHERE id = $1 AND user_id = $2',
+      [photoId, userId]
+    );
+    
+    // Supprimer le fichier physique seulement si ce n'est pas une URL externe
+    if (!photo.is_external && photo.url) {
+      const relativePath = photo.url.startsWith('/') ? photo.url.substring(1) : photo.url;
+      const filePath = path.join(__dirname, '../../', relativePath);
+      
+      fs.unlink(filePath, (err) => {
+      });
+    }
+    // Si c'était la photo de profil, en promouvoir une autre
+    if (photo.is_profile) {
+      const remaining = await pool.query(
+        'SELECT id FROM photos WHERE user_id = $1 ORDER BY id LIMIT 1',
+        [userId]
+      );
+      
+      if (remaining.rows.length > 0) {
+        await pool.query(
+          'UPDATE photos SET is_profile = true WHERE id = $1',
+          [remaining.rows[0].id]
+        );
+      }
+    }
+    
+    return photo;
+  },
+
+  // Compter les photos d'un utilisateur
+  async count(userId) {
+    const result = await pool.query(
+      'SELECT COUNT(*) FROM photos WHERE user_id = $1',
+      [userId]
+    );
+    return parseInt(result.rows[0].count);
+  }
+};
+
+module.exports = photoModel;
+
+
+=== FILE: ./backend/src/models/searchModel.js ===
+
+const pool = require("../db/pool");
+
+const searchModel = {
+  // Fonction privée pour construire la clause WHERE
+  _buildWhereClause(filters, currentUserId) {
+    let whereClause = `u.id != $1 AND u.is_verified = true`;
+    const values = [currentUserId];
+    let paramIndex = 2;
+
+    if (filters.ageMin) {
+      whereClause += ` AND EXTRACT(YEAR FROM age(CURRENT_DATE, u.birth_date)) >= $${paramIndex}`;
+      values.push(filters.ageMin);
+      paramIndex++;
+    }
+
+    if (filters.ageMax) {
+      whereClause += ` AND EXTRACT(YEAR FROM age(CURRENT_DATE, u.birth_date)) <= $${paramIndex}`;
+      values.push(filters.ageMax);
+      paramIndex++;
+    }
+
+    if (filters.preferences && filters.preferences.length > 0) {
+      whereClause += ` AND u.gender = ANY($${paramIndex}::text[])`;
+      values.push(filters.preferences);
+      paramIndex++;
+    }
+
+    if (filters.latitude && filters.longitude && filters.distance) {
+      whereClause += ` AND u.location_manual = false AND (
+        6371 * acos(cos(radians($${paramIndex})) * cos(radians(u.latitude)) * 
+        cos(radians(u.longitude) - radians($${paramIndex + 1})) + 
+        sin(radians($${paramIndex})) * sin(radians(u.latitude))) <= $${paramIndex + 2}
+      )`;
+      values.push(filters.latitude, filters.longitude, filters.distance);
+      paramIndex += 3;
+    }
+
+    if (filters.popularityMin !== undefined) {
+      whereClause += ` AND u.popularity_score >= $${paramIndex}`;
+      values.push(filters.popularityMin);
+      paramIndex++;
+    }
+
+    if (filters.popularityMax !== undefined) {
+      whereClause += ` AND u.popularity_score <= $${paramIndex}`;
+      values.push(filters.popularityMax);
+      paramIndex++;
+    }
+
+    if (filters.tags && filters.tags.length > 0) {
+      whereClause += ` AND EXISTS (
+        SELECT 1 FROM user_tags ut
+        JOIN tags t ON t.id = ut.tag_id
+        WHERE ut.user_id = u.id AND t.name = ANY($${paramIndex}::text[])
+        GROUP BY ut.user_id
+        HAVING COUNT(DISTINCT t.name) >= ${filters.tags.length}
+      )`;
+      values.push(filters.tags);
+      paramIndex++;
+    }
+
+    whereClause += ` AND NOT EXISTS (
+      SELECT 1 FROM blocks b 
+      WHERE (b.blocker_id = $1 AND b.blocked_id = u.id)
+      OR (b.blocker_id = u.id AND b.blocked_id = $1)
+    )`;
+
+    return { whereClause, values, nextIndex: paramIndex };
+  },
+
+async searchUsers(filters, currentUserId) {
+    const { whereClause, values, nextIndex } = this._buildWhereClause(
+      filters,
+      currentUserId,
+    );
+
+    let query = `
+      SELECT u.id, u.username, u.first_name, u.last_name, u.bio, u.gender, 
+             u.sexual_preferences, u.is_verified, u.popularity_score, u.last_seen,
+             u.latitude, u.longitude, u.location_city, u.location_manual,
+             u.birth_date,
+             EXTRACT(YEAR FROM age(CURRENT_DATE, u.birth_date)) as age,
+             (SELECT COUNT(*) FROM photos WHERE user_id = u.id) as photo_count,
+             (SELECT url FROM photos WHERE user_id = u.id AND is_profile = true) as profile_photo,
+             (SELECT is_external FROM photos WHERE user_id = u.id AND is_profile = true) as photo_is_external,
+             (SELECT COUNT(*) FROM user_tags WHERE user_id = u.id AND tag_id IN 
+                (SELECT tag_id FROM user_tags WHERE user_id = $1)) as common_tags,
+             COALESCE(
+               (SELECT json_agg(t.name) 
+                FROM user_tags ut 
+                JOIN tags t ON t.id = ut.tag_id 
+                WHERE ut.user_id = u.id),
+               '[]'
+             ) as tags
+      FROM users u
+      WHERE ${whereClause}
+    `;
+
+    const allowedOrderBy = ["popularity_score", "age", "location_city", "common_tags"];
+    const orderBy = allowedOrderBy.includes(filters.orderBy)
+      ? filters.orderBy
+      : "popularity_score";
+    const orderDirection = filters.orderDirection === "ASC" ? "ASC" : "DESC";
+    
+    query += ` ORDER BY ${orderBy} ${orderDirection}`;
+
+    const limit = Math.min(filters.limit || 20, 100);
+    const offset = filters.offset || 0;
+    
+    const finalValues = [...values, limit, offset];
+    
+    query += ` LIMIT $${nextIndex + 1} OFFSET $${nextIndex + 2}`;
+
+    const result = await pool.query(query, finalValues);
+
+    return result.rows.map((row) => ({
+      ...row,
+      tags: Array.isArray(row.tags) ? row.tags : JSON.parse(row.tags || "[]"),
+    }));
+  },
+
+  async countSearchResults(filters, currentUserId) {
+    const { whereClause, values } = this._buildWhereClause(
+      filters,
+      currentUserId,
+    );
+
+    const query = `
+      SELECT COUNT(*) as total
+      FROM users u
+      WHERE ${whereClause}
+    `;
+
+    const result = await pool.query(query, values);
+    return parseInt(result.rows[0].total);
+  },
+
+  calculateDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371;
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLon = ((lon2 - lon1) * Math.PI) / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos((lat1 * Math.PI) / 180) *
+        Math.cos((lat2 * Math.PI) / 180) *
+        Math.sin(dLon / 2) *
+        Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  },
+
+  // Suggestions intelligentes
+  async getSuggestions(userId, limit = 20) {
+    const userResult = await pool.query(
+      `SELECT id, latitude, longitude, sexual_preferences 
+     FROM users WHERE id = $1`,
+      [userId],
+    );
+
+    if (userResult.rows.length === 0) return [];
+    const user = userResult.rows[0];
+
+    let preferredGenders = [];
+    switch (user.sexual_preferences) {
+      case "male":
+        preferredGenders = ["male"];
+        break;
+      case "female":
+        preferredGenders = ["female"];
+        break;
+      case "bisexual":
+        preferredGenders = ["male", "female", "other"];
+        break;
+      default:
+        preferredGenders = ["male", "female", "other"];
+    }
+
+    let query = `
+    SELECT u.id, u.username, u.first_name, u.last_name, u.bio, 
+           u.popularity_score, u.last_seen, u.latitude, u.longitude, 
+           u.location_city, u.location_manual, u.birth_date,
+           u.is_online,
+           (SELECT url FROM photos WHERE user_id = u.id AND is_profile = true) as profile_photo,
+           (SELECT is_external FROM photos WHERE user_id = u.id AND is_profile = true) as photo_is_external,
+           COALESCE(
+             (SELECT json_agg(t.name) 
+              FROM user_tags ut 
+              JOIN tags t ON t.id = ut.tag_id 
+              WHERE ut.user_id = u.id),
+             '[]'
+           ) as tags,
+           COUNT(DISTINCT ut.tag_id) as common_tags
+    FROM users u
+    LEFT JOIN user_tags ut ON ut.user_id = u.id
+    WHERE u.id != $1 
+    AND u.is_verified = true
+    AND u.gender = ANY($2::text[])
+    AND u.id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id = $1)
+    AND u.id NOT IN (SELECT blocker_id FROM blocks WHERE blocked_id = $1)
+    GROUP BY u.id
+  `;
+
+    const values = [userId, preferredGenders];
+
+    if (user.latitude !== null && user.longitude !== null) {
+      query += `
+      ORDER BY 
+        CASE WHEN u.latitude IS NOT NULL AND u.longitude IS NOT NULL
+             THEN 6371 * acos(LEAST(1.0, GREATEST(-1.0,
+                  cos(radians($3)) * cos(radians(u.latitude)) * 
+                  cos(radians(u.longitude) - radians($4)) + 
+                  sin(radians($3)) * sin(radians(u.latitude))
+             ))) ELSE NULL
+        END IS NOT NULL DESC,
+        common_tags DESC,
+        u.popularity_score DESC
+    `;
+      values.push(user.latitude, user.longitude);
+    } else {
+      query += `
+      ORDER BY 
+        common_tags DESC,
+        u.popularity_score DESC
+    `;
+    }
+
+    query += ` LIMIT $${values.length + 1}`;
+    values.push(limit);
+
+    const result = await pool.query(query, values);
+
+    return result.rows.map((row) => ({
+      ...row,
+      tags: Array.isArray(row.tags) ? row.tags : JSON.parse(row.tags || "[]"),
+    }));
+  },
+};
+
+module.exports = searchModel;
+
+
+=== FILE: ./backend/src/models/tagModel.js ===
+
+const pool = require('../db/pool');
+
+const tagModel = {
+  async getAll() {
+    const result = await pool.query('SELECT id, name FROM tags ORDER BY name');
+    return result.rows;
+  },
+
+  async getUserTags(userId) {
+    const result = await pool.query(
+      `SELECT t.id, t.name FROM tags t
+       JOIN user_tags ut ON ut.tag_id = t.id
+       WHERE ut.user_id = $1`,
+      [userId]
+    );
+    return result.rows;
+  },
+
+  async addToUser(userId, tagId) {
+    const result = await pool.query(
+      'INSERT INTO user_tags (user_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING RETURNING *',
+      [userId, tagId]
+    );
+    return result.rows[0] || null;
+  },
+
+  async removeFromUser(userId, tagId) {
+    const result = await pool.query(
+      'DELETE FROM user_tags WHERE user_id = $1 AND tag_id = $2 RETURNING *',
+      [userId, tagId]
+    );
+    return result.rows[0] || null;
+  },
+
+  async findByName(name) {
+    const result = await pool.query(
+      'SELECT id, name FROM tags WHERE name = $1',
+      [name]
+    );
+    return result.rows[0] || null;
+  },
+
+  async create(name) {
+    const result = await pool.query(
+      'INSERT INTO tags (name) VALUES ($1) ON CONFLICT (name) DO NOTHING RETURNING *',
+      [name]
+    );
+    if (result.rows[0]) return result.rows[0];
+    return this.findByName(name);
+  }
+};
+
+module.exports = tagModel;
+
+=== FILE: ./backend/src/models/userModel.js ===
+
+const pool = require("../db/pool");
+
+const userModel = {
+  // Trouver un utilisateur par email
+  async findByEmail(email) {
+    const result = await pool.query(
+      "SELECT id, email, username, first_name, last_name, password_hash, is_verified, created_at FROM users WHERE email = $1",
+      [email],
+    );
+    return result.rows[0] || null;
+  },
+
+  // Trouver un utilisateur par username
+  async findByUsername(username) {
+    const result = await pool.query(
+      "SELECT id, email, username, first_name, last_name, password_hash, is_verified, created_at FROM users WHERE username = $1",
+      [username],
+    );
+    return result.rows[0] || null;
+  },
+
+  // Trouver un utilisateur par username (avec mot de passe pour login)
+  async findByUsernameWithPassword(username) {
+    const result = await pool.query(
+      "SELECT id, email, username, first_name, last_name, password_hash, is_verified FROM users WHERE username = $1",
+      [username],
+    );
+    return result.rows[0] || null;
+  },
+
+  // Trouver un utilisateur par ID
+  async findById(id) {
+    const result = await pool.query(
+      `SELECT id, email, username, first_name, last_name, is_verified, created_at, 
+            bio, gender, sexual_preferences, popularity_score, last_seen, birth_date,
+            location_city, latitude, longitude, location_manual, is_online,
+            (SELECT url FROM photos WHERE user_id = users.id AND is_profile = true) as profile_photo,
+            (SELECT is_external FROM photos WHERE user_id = users.id AND is_profile = true) as photo_is_external
+     FROM users WHERE id = $1`,
+      [id],
+    );
+
+    if (result.rows.length === 0) return null;
+
+    const user = result.rows[0];
+
+    const tagsResult = await pool.query(
+      `SELECT t.name 
+     FROM tags t
+     JOIN user_tags ut ON ut.tag_id = t.id
+     WHERE ut.user_id = $1`,
+      [id],
+    );
+
+    user.tags = tagsResult.rows.map((row) => `#${row.name}`);
+
+    return user;
+  },
+
+  // Créer un utilisateur
+  async create({ email, username, firstName, lastName, passwordHash }) {
+    const result = await pool.query(
+      `INSERT INTO users (email, username, first_name, last_name, password_hash)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, email, username, first_name, last_name, is_verified, created_at`,
+      [email, username, firstName, lastName, passwordHash],
+    );
+    return result.rows[0];
+  },
+
+  // Créer un utilisateur avec token de vérification
+  async createWithVerification({
+    email,
+    username,
+    firstName,
+    lastName,
+    passwordHash,
+    verificationToken,
+    verificationExpires,
+  }) {
+    const result = await pool.query(
+      `INSERT INTO users (email, username, first_name, last_name, password_hash, verification_token, verification_expires)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING id, email, username, first_name, last_name, is_verified, created_at`,
+      [
+        email,
+        username,
+        firstName,
+        lastName,
+        passwordHash,
+        verificationToken,
+        verificationExpires,
+      ],
+    );
+    return result.rows[0];
+  },
+
+  // Mettre à jour le profil utilisateur
+  async updateProfile(userId, updates) {
+    const allowedFields = [
+      "first_name",
+      "last_name",
+      "email",
+      "bio",
+      "gender",
+      "sexual_preferences",
+      "birth_date",
+    ];
+    const fields = [];
+    const values = [];
+    let index = 1;
+
+    for (const [key, value] of Object.entries(updates)) {
+      if (allowedFields.includes(key) && value !== undefined) {
+        fields.push(`${key} = $${index}`);
+        values.push(value);
+        index++;
+      }
+    }
+
+    if (fields.length === 0) return null;
+
+    fields.push(`updated_at = NOW()`);
+    values.push(userId);
+
+    const result = await pool.query(
+      `UPDATE users SET ${fields.join(", ")} WHERE id = $${index} 
+     RETURNING id, email, username, first_name, last_name, bio, gender, sexual_preferences, is_verified, created_at, updated_at, birth_date`,
+      values,
+    );
+
+    return result.rows[0] || null;
+  },
+
+  // Vérifier si un email existe déjà
+  async emailExists(email) {
+    const result = await pool.query("SELECT id FROM users WHERE email = $1", [
+      email,
+    ]);
+    return result.rows.length > 0;
+  },
+
+  // Vérifier si un username existe déjà
+  async usernameExists(username) {
+    const result = await pool.query(
+      "SELECT id FROM users WHERE username = $1",
+      [username],
+    );
+    return result.rows.length > 0;
+  },
+
+  // Vérification email
+  async findByVerificationToken(token) {
+    const result = await pool.query(
+      "SELECT id, email, username FROM users WHERE verification_token = $1 AND verification_expires > NOW()",
+      [token],
+    );
+    return result.rows[0] || null;
+  },
+
+  async verifyUser(userId) {
+    await pool.query(
+      "UPDATE users SET is_verified = true, verification_token = NULL, verification_expires = NULL WHERE id = $1",
+      [userId],
+    );
+  },
+
+  // Mettre à jour last_seen
+  async updateLastSeen(userId) {
+    await pool.query("UPDATE users SET last_seen = NOW() WHERE id = $1", [
+      userId,
+    ]);
+  },
+
+  // Mettre à jour le statut en ligne
+  async updateOnlineStatus(userId, isOnline) {
+    await pool.query(
+      "UPDATE users SET is_online = $1, last_seen = NOW() WHERE id = $2",
+      [isOnline, userId],
+    );
+  },
+};
+
+module.exports = userModel;
+
+
+=== FILE: ./backend/src/models/visitModel.js ===
+
+const pool = require("../db/pool");
+
+const visitModel = {
+  // Enregistrer une visite
+  async add(visitorId, visitedId) {
+    // Ne pas enregistrer si on visite son propre profil
+    if (visitorId === visitedId) return null;
+
+    // Vérifier si l'utilisateur visité existe
+    const userExists = await pool.query("SELECT id FROM users WHERE id = $1", [
+      visitedId,
+    ]);
+    if (userExists.rows.length === 0) return null;
+
+    // Met a jour la date de la visite sinon creer une nouvelle visite
+    const existingVisit = await pool.query(
+      "SELECT id FROM visits WHERE visitor_id = $1 AND visited_id = $2",
+      [visitorId, visitedId],
+    );
+
+    if (existingVisit.rows.length > 0) {
+      await pool.query("UPDATE visits SET viewed_at = NOW() WHERE id = $1",
+        [existingVisit.rows[0].id],
+	);
+      return existingVisit.rows[0];
+    }
+
+    // Insérer la visite
+    const result = await pool.query(
+	  "INSERT INTO visits (visitor_id, visited_id) VALUES ($1, $2) RETURNING *",
+	  [visitorId, visitedId],
+	);
+
+    return result.rows[0] || null;
+  },
+
+  // Récupérer les visiteurs de mon profil
+  async getMyVisitors(userId, limit = 50) {
+    const result = await pool.query(
+      `SELECT DISTINCT ON (v.visitor_id) 
+              v.visitor_id, v.viewed_at,
+              u.username, u.first_name, u.last_name,
+              (SELECT url FROM photos WHERE user_id = u.id AND is_profile = true) as profile_photo
+       FROM visits v
+       JOIN users u ON u.id = v.visitor_id
+       WHERE v.visited_id = $1
+       ORDER BY v.visitor_id, v.viewed_at DESC
+       LIMIT $2`,
+      [userId, limit],
+    );
+    return result.rows;
+  },
+
+  // Compter le nombre de visites reçues
+  async countVisits(userId) {
+    const result = await pool.query(
+      "SELECT COUNT(DISTINCT visitor_id) FROM visits WHERE visited_id = $1",
+      [userId],
+    );
+    return parseInt(result.rows[0].count);
+  },
+};
+
+module.exports = visitModel;
+
+
+=== FILE: ./backend/src/models/reportModel.js ===
+
+const pool = require('../db/pool');
+
+const reportModel = {
+  async add(reporterId, reportedId) {
+    const existing = await pool.query(
+      'SELECT * FROM reports WHERE reporter_id = $1 AND reported_id = $2',
+      [reporterId, reportedId]
+    );
+
+    if (existing.rows.length > 0) {
+      return null;
+    }
+
+    const result = await pool.query(
+      'INSERT INTO reports (reporter_id, reported_id) VALUES ($1, $2) RETURNING *',
+      [reporterId, reportedId]
+    );
+
+    return result.rows[0];
+  }
+};
+
+module.exports = reportModel;
+
+=== FILE: ./backend/src/routes/authRoutes.js ===
+
+const express = require('express');
+const router = express.Router();
+const authController = require('../controllers/authController');
+
+// Vérification de l'email
+router.get('/verify/:token', authController.verifyEmail);
+
+// Enregistrement d'un nouvel utilisateur
+router.post('/register', authController.register);
+
+// Connexion d'un utilisateur existant
+router.post('/login', authController.login);
+
+router.post('/forgot-password', authController.forgotPassword);
+router.post('/reset-password', authController.resetPassword);
+
+module.exports = router;
+
+=== FILE: ./backend/src/routes/blockRoutes.js ===
+
+const express = require('express');
+const router = express.Router();
+const blockController = require('../controllers/blockController');
+const authMiddleware = require('../middlewares/authMiddleware');
+
+router.use(authMiddleware);
+
+router.post('/:userId', blockController.blockUser);
+router.delete('/:userId', blockController.unblockUser);
+router.get('/check/:userId', blockController.checkBlock);
+router.get('/', blockController.getBlockedUsers);
+
+module.exports = router;
+
+
+=== FILE: ./backend/src/routes/likeRoutes.js ===
+
+const express = require('express');
+const router = express.Router();
+const likeController = require('../controllers/likeController');
+const authMiddleware = require('../middlewares/authMiddleware');
+
+router.use(authMiddleware);
+
+router.post('/:userId', likeController.addLike);
+router.delete('/:userId', likeController.removeLike);
+router.get('/received', likeController.getReceivedLikes);
+router.get('/sent', likeController.getSentLikes);
+router.get('/matches', likeController.getMatches);
+router.get('/check/:userId', likeController.checkLike);
+
+module.exports = router;
+
+
+=== FILE: ./backend/src/routes/locationRoutes.js ===
+
+const express = require('express');
+const router = express.Router();
+const locationController = require('../controllers/locationController');
+const authMiddleware = require('../middlewares/authMiddleware');
+
+router.use(authMiddleware);
+
+router.get('/me', locationController.getMyLocation);
+router.put('/gps', locationController.updateGpsLocation);
+router.put('/manual', locationController.updateManualLocation);
+router.delete('/me', locationController.disableLocation);
+
+module.exports = router;
+
+=== FILE: ./backend/src/routes/messageRoutes.js ===
+
+const express = require('express');
+const router = express.Router();
+const messageController = require('../controllers/messageController');
+const authMiddleware = require('../middlewares/authMiddleware');
+
+router.use(authMiddleware);
+
+router.post('/:toUserId', messageController.sendMessage);
+router.get('/conversations', messageController.getConversations);
+router.get('/unread', messageController.getUnreadCount);
+router.get('/:userId', messageController.getConversation);
+
+module.exports = router;
+
+
+=== FILE: ./backend/src/routes/notificationRoutes.js ===
+
+const express = require('express');
+const router = express.Router();
+const notificationController = require('../controllers/notificationController');
+const authMiddleware = require('../middlewares/authMiddleware');
+
+router.use(authMiddleware);
+
+router.get('/', notificationController.getMyNotifications);
+router.put('/:id/read', notificationController.markAsRead);
+router.put('/read-all', notificationController.markAllAsRead);
+router.get('/unread/count', notificationController.getUnreadCount);
+router.delete('/:id', notificationController.deleteNotification);
+
+module.exports = router;
+
+
+=== FILE: ./backend/src/routes/photoRoutes.js ===
+
+const express = require("express");
+const router = express.Router();
+const photoController = require("../controllers/photoController");
+const authMiddleware = require("../middlewares/authMiddleware");
+const upload = require("../middlewares/uploadMiddleware");
+
+router.use(authMiddleware);
+
+// Routes
+router.post(
+  "/upload",
+  upload.single("photo"),
+  photoController.handleMulterError,
+  photoController.uploadPhoto,
+);
+router.get("/me", photoController.getMyPhotos);
+router.get("/user/:id", photoController.getUserPhotos);
+router.put("/profile/:photoId", photoController.setProfilePhoto);
+router.delete("/:photoId", photoController.deletePhoto);
+
+module.exports = router;
+
+
+=== FILE: ./backend/src/routes/profileRoutes.js ===
+
+const express = require('express');
+const router = express.Router();
+const profileController = require('../controllers/profileController');
+const authMiddleware = require('../middlewares/authMiddleware');
+
+router.use(authMiddleware);
+
+// Mon profil
+router.get('/me', profileController.getMyProfile);
+router.put('/me', profileController.updateProfile);
+
+// Mes visiteurs
+router.get('/visitors', profileController.getMyVisitors);
+
+// Profil d'un autre utilisateur
+router.get('/:id', profileController.getUserProfile);
+
+module.exports = router;
+
+
+=== FILE: ./backend/src/routes/searchRoutes.js ===
+
+const express = require('express');
+const router = express.Router();
+const searchController = require('../controllers/searchController');
+const authMiddleware = require('../middlewares/authMiddleware');
+
+router.use(authMiddleware);
+
+router.get('/', searchController.searchUsers);
+router.get('/suggestions', searchController.getSuggestions);
+
+module.exports = router;
+
+
+=== FILE: ./backend/src/routes/tagRoutes.js ===
+
+const express = require('express');
+const router = express.Router();
+const tagController = require('../controllers/tagController');
+const authMiddleware = require('../middlewares/authMiddleware');
+
+router.use(authMiddleware);
+
+// Tous les tags
+router.get('/', tagController.getAllTags);
+
+// Mes tags
+router.get('/me', tagController.getMyTags);
+router.post('/me', tagController.addTag);
+router.delete('/me/:tagName', tagController.removeTag);
+
+// Tags d'un autre utilisateur
+router.get('/user/:id', tagController.getUserTags);
+
+module.exports = router;
+
+=== FILE: ./backend/src/routes/reportRoutes.js ===
+
+const express = require('express');
+const router = express.Router();
+const reportController = require('../controllers/reportController');
+const authMiddleware = require('../middlewares/authMiddleware');
+
+router.use(authMiddleware);
+
+router.post('/:userId', reportController.reportUser);
+
+module.exports = router;
+
+=== FILE: ./backend/src/services/emailService.js ===
+
+const nodemailer = require('nodemailer');
+
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASSWORD,
+  },
+});
+
+const sendVerificationEmail = async (email, username, verificationToken) => {
+  const verificationUrl = `${process.env.FRONTEND_URL}/verify/${verificationToken}`;
+  
+  const mailOptions = {
+    from: `"Matcha" <${process.env.EMAIL_USER}>`,
+    to: email,
+    subject: 'Bienvenue sur Matcha - Vérifie ton compte',
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h1 style="color: #e91e63;">Bienvenue sur Matcha, ${username} !</h1>
+        <p>Merci de t'être inscrit. Pour commencer à utiliser l'application, veuillez vérifier ton adresse email.</p>
+        <a href="${verificationUrl}" style="display: inline-block; background-color: #e91e63; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; margin: 20px 0;">Vérifier mon compte</a>
+        <p>Ou copie ce lien dans ton navigateur :</p>
+        <p style="background-color: #f5f5f5; padding: 10px; word-break: break-all;">${verificationUrl}</p>
+        <p>Ce lien expirera dans 24 heures.</p>
+        <hr style="margin: 30px 0;" />
+        <p style="color: #999; font-size: 12px;">L'équipe Matcha</p>
+      </div>
+    `,
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+  } catch (error) {
+    throw error;
+  }
+};
+
+const sendPasswordResetEmail = async (email, username, resetToken) => {
+  const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
+  
+  const mailOptions = {
+    from: `"Matcha" <${process.env.EMAIL_USER}>`,
+    to: email,
+    subject: 'Réinitialisation de ton mot de passe Matcha',
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h1 style="color: #e91e63;">Bonjour ${username},</h1>
+        <p>Tu as demandé à réinitialiser ton mot de passe.</p>
+        <a href="${resetUrl}" style="display: inline-block; background-color: #e91e63; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; margin: 20px 0;">Réinitialiser mon mot de passe</a>
+        <p>Ce lien est valide pendant 1 heure.</p>
+        <p>Si tu n'as pas fait cette demande, ignore simplement cet email.</p>
+      </div>
+    `,
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+  } catch (error) {
+    throw error;
+  }
+};
+
+module.exports = { sendVerificationEmail, sendPasswordResetEmail };
+
+=== FILE: ./backend/src/socket/index.js ===
+
+const { Server } = require('socket.io');
+const { message, notification, user, like } = require('../models'); // <-- AJOUT DE 'like'
+
+let io;
+const disconnectTimeouts = {}; 
+
+function initSocket(server) {
+  io = new Server(server, {
+    cors: { origin: '*', credentials: true },
+    pingTimeout: 60000,
+    pingInterval: 25000
+  });
+  
+  io.use((socket, next) => {
+    const token = socket.handshake.auth.token;
+    if (!token) return next(new Error('Authentication error'));
+    try {
+      const jwt = require('jsonwebtoken');
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      socket.userId = decoded.userId;
+      next();
+    } catch (err) {
+      next(new Error('Authentication error'));
+    }
+  });
+  
+  io.on('connection', async (socket) => {
+    if (disconnectTimeouts[socket.userId]) {
+      clearTimeout(disconnectTimeouts[socket.userId]);
+      delete disconnectTimeouts[socket.userId];
+    }
+
+    await user.updateOnlineStatus(socket.userId, true);
+    io.emit('user_status', { userId: socket.userId, isOnline: true });
+    
+    socket.join(`user:${socket.userId}`);
+    
+    socket.on('send_message', async (data, callback) => {
+      try {
+        const { toUserId, content } = data;
+        
+        if (!content || content.trim().length === 0) {
+          if (callback) callback({ error: 'Le message ne peut pas être vide' });
+          return;
+        }
+
+        // SÉCURITÉ ABSOLUE : Vérifier le match directment dans le socket
+        const isMatch = await like.isMatch(socket.userId, toUserId);
+        if (!isMatch) {
+          if (callback) callback({ error: 'Vous devez être matché pour envoyer un message' });
+          return;
+        }
+        
+        const newMessage = await message.send(socket.userId, toUserId, content);
+        io.to(`user:${toUserId}`).emit('new_message', newMessage);
+        
+        const fromUser = await user.findById(socket.userId);
+        const notif = await notification.create(
+          toUserId, 'message', socket.userId,
+          `${fromUser.first_name} ${fromUser.last_name} vous a envoyé un message`,
+          { messageId: newMessage.id }
+        );
+        io.to(`user:${toUserId}`).emit('notification', notif);
+        
+        if (callback) callback({ success: true, message: newMessage });
+      } catch (error) {
+        if (callback) callback({ error: error.message });
+      }
+    });
+    
+    socket.on('mark_read', async (data, callback) => {
+      try {
+        await message.markAsRead(socket.userId, data.fromUserId);
+        if (callback) callback({ success: true });
+      } catch (error) {
+        if (callback) callback({ error: error.message });
+      }
+    });
+    
+    socket.on('disconnect', () => {
+      disconnectTimeouts[socket.userId] = setTimeout(async () => {
+        await user.updateOnlineStatus(socket.userId, false);
+        io.emit('user_status', { userId: socket.userId, isOnline: false });
+        delete disconnectTimeouts[socket.userId];
+      }, 5000);
+    });
+  });
+  
+  return io;
+}
+
+function getIo() {
+  if (!io) throw new Error('Socket.io not initialized');
+  return io;
+}
+
+module.exports = { initSocket, getIo };
+
+=== FILE: ./frontend/eslint.config.js ===
+
+import js from '@eslint/js'
+import globals from 'globals'
+import reactHooks from 'eslint-plugin-react-hooks'
+import reactRefresh from 'eslint-plugin-react-refresh'
+import { defineConfig, globalIgnores } from 'eslint/config'
+
+export default defineConfig([
+  globalIgnores(['dist']),
+  {
+    files: ['**/*.{js,jsx}'],
+    extends: [
+      js.configs.recommended,
+      reactHooks.configs.flat.recommended,
+      reactRefresh.configs.vite,
+    ],
+    languageOptions: {
+      ecmaVersion: 2020,
+      globals: globals.browser,
+      parserOptions: {
+        ecmaVersion: 'latest',
+        ecmaFeatures: { jsx: true },
+        sourceType: 'module',
+      },
+    },
+    rules: {
+      'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
+    },
+  },
+])
+
+
+=== FILE: ./frontend/src/App.jsx ===
+
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { AuthProvider } from './context/AuthContext';
+import { SocketProvider } from './context/SocketContext';
+import { NotificationProvider } from './context/NotificationContext';
+import MainLayout from './layouts/MainLayout';
+import Login from './pages/Login';
+import ProtectedRoute from './components/ProtectedRoute';
+import Search from './pages/Search';
+import Profile from './pages/Profile';
+import PublicProfile from './pages/PublicProfile';
+import Chat from './pages/Chat';
+import VerifyEmail from './pages/VerifyEmail';
+import ResetPassword from './pages/ResetPassword';
+import './assets/css/global.css';
+
+function App() {
+  return (
+    <BrowserRouter>
+      <AuthProvider>
+        <SocketProvider>
+          <NotificationProvider>
+            <Routes>
+              {/* ROUTES PUBLIQUES (NON CONNECTÉ) */}
+              <Route path="/login" element={<Login />} />
+              <Route path="/verify/:token" element={<VerifyEmail />} />
+              <Route path="/reset-password/:token" element={<ResetPassword />} />
+              
+              {/* ROUTES PRIVÉES (CONNECTÉ) */}
+              <Route element={<ProtectedRoute />}>
+                <Route path="/" element={<MainLayout />}>
+                  <Route index element={<Navigate to="/search" replace />} />
+                  <Route path="search" element={<Search />} />
+                  <Route path="profile" element={<Profile />} />
+                  <Route path="profile/:id" element={<PublicProfile />} />
+                  <Route path="user/:id" element={<PublicProfile />} />
+                  <Route path="chat" element={<Chat />} />
+                </Route>
+              </Route>
+            </Routes>
+          </NotificationProvider>
+        </SocketProvider>
+      </AuthProvider>
+    </BrowserRouter>
+  );
+}
+
+export default App;
+
+=== FILE: ./frontend/src/components/Avatar.jsx ===
+
+import API_URL from '../config/api';
+
+function Avatar({ user, size = 'md', onClick }) {
+  const sizeMap = { sm: 32, md: 48, lg: 64, xl: 120 };
+  const dimension = sizeMap[size] || 48;
+  
+  const avatarUrl = user?.profile_photo 
+    ? (user.profile_photo.startsWith('http') ? user.profile_photo : `${API_URL.replace('/api', '')}${user.profile_photo}`)
+    : `https://ui-avatars.com/api/?background=8baa5e&color=fff&rounded=true&name=${encodeURIComponent(user?.first_name || user?.username || 'User')}`;
+
+  return (
+    <img 
+      src={avatarUrl}
+      alt={user?.username || 'Avatar'}
+      className={`avatar avatar-${size}`}
+      style={{ 
+        width: dimension, 
+        height: dimension, 
+        borderRadius: '50%', 
+        objectFit: 'cover',
+        cursor: onClick ? 'pointer' : 'default',
+        border: '2px solid var(--color-sunlight)'
+      }}
+      onClick={onClick}
+    />
+  );
+}
+
+export default Avatar;
+
+=== FILE: ./frontend/src/components/NotificationBell.jsx ===
+
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useNotifications } from '../context/NotificationContext';
+import '../assets/css/notification.css';
+
+function NotificationBell() {
+  const navigate = useNavigate();
+  const { notifications, unreadCount, markAsRead, markAllAsRead, deleteNotification } = useNotifications();
+  const [isOpen, setIsOpen] = useState(false);
+
+  const handleNotificationClick = (notification) => {
+    if (!notification.is_read) {
+      markAsRead(notification.id);
+    }
+    
+    setIsOpen(false);
+    
+    switch (notification.type) {
+      case 'like':
+      case 'match':
+        if (notification.from_user_id) {
+          navigate(`/profile/${notification.from_user_id}`);
+        } else {
+          navigate('/search');
+        }
+        break;
+      case 'message':
+        if (notification.from_user_id) {
+          navigate('/chat');
+        } else {
+          navigate('/chat');
+        }
+        break;
+      case 'visit':
+        if (notification.from_user_id) {
+          navigate(`/profile/${notification.from_user_id}`);
+        } else {
+          navigate('/search');
+        }
+        break;
+      default:
+        navigate('/search');
+    }
+  };
+
+  const handleDeleteClick = (e, notificationId) => {
+    e.stopPropagation();
+    deleteNotification(notificationId);
+  };
+
+  return (
+    <div className="notification-container">
+      <button 
+        className={`notification-bell ${unreadCount > 0 ? 'has-unread' : ''}`}
+        onClick={() => setIsOpen(!isOpen)}
+      >
+        🔔
+        {unreadCount > 0 && <span className="notification-badge">{unreadCount}</span>}
+      </button>
+
+      {isOpen && (
+        <div className="notification-dropdown">
+          <div className="notification-header">
+            <h4>Notifications</h4>
+            {unreadCount > 0 && (
+              <button className="mark-all-read" onClick={markAllAsRead}>
+                Tout marquer comme lu
+              </button>
+            )}
+          </div>
+          <div className="notification-list">
+            {notifications.length === 0 ? (
+              <p className="no-notifications">Aucune notification</p>
+            ) : (
+              notifications.map(notif => (
+                <div 
+                  key={notif.id} 
+                  className={`notification-item ${!notif.is_read ? 'unread' : ''}`}
+                  onClick={() => handleNotificationClick(notif)}
+                >
+                  <div className="notification-content">
+                    <p>{notif.content}</p>
+                    <small>{new Date(notif.created_at).toLocaleString()}</small>
+                  </div>
+                  <button 
+                    className="delete-notif"
+                    onClick={(e) => handleDeleteClick(e, notif.id)}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default NotificationBell;
+
+
+=== FILE: ./frontend/src/components/ProtectedRoute.jsx ===
+
+import { Navigate, Outlet } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+
+function ProtectedRoute() {
+  const { user } = useAuth();
+
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+
+  return <Outlet />;
+}
+
+export default ProtectedRoute;
+
+=== FILE: ./frontend/src/components/UserCard.jsx ===
+
+import { Link } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import API_URL from '../config/api';
+import { calculateAge } from '../utils/age';
+import '../assets/css/components.css';
+
+function UserCard({ user, currentUserTags = [] }) {
+  const [isLiked, setIsLiked] = useState(false);
+  const [likeLoading, setLikeLoading] = useState(false);
+
+  const getPhotoUrl = (photoUrl, isExternal) => {
+    if (!photoUrl) return '/default-avatar.png';
+    if (isExternal) return photoUrl;
+    return `${API_URL.replace('/api', '')}${photoUrl}`;
+  };
+
+  useEffect(() => {
+    const checkLikeStatus = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`${API_URL}/likes/check/${user.id}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          setIsLiked(data.liked);
+        }
+      } catch (err) {
+        console.error('Erreur vérification like:', err);
+      }
+    };
+    
+    if (user.id) {
+      checkLikeStatus();
+    }
+  }, [user.id]);
+
+  const age = calculateAge(user.birth_date);
+  const location = user.location_city || user.location || 'Location inconnue';
+  const tags = user.tags || [];
+  const profilePhoto = getPhotoUrl(user.profile_photo, user.photo_is_external);
+
+  const handleLike = async (e) => {
+    e.preventDefault();
+    if (likeLoading) return;
+    
+    setLikeLoading(true);
+    
+    try {
+      const token = localStorage.getItem('token');
+      const method = isLiked ? 'DELETE' : 'POST';
+      
+      const response = await fetch(`${API_URL}/likes/${user.id}`, {
+        method: method,
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (response.ok) {
+        setIsLiked(!isLiked);
+        const data = await response.json();
+        if (data.match) {
+          alert(`❤️ C'est un match avec ${user.first_name || user.username} ! Vous pouvez maintenant discuter.`);
+        }
+      }
+    } catch (err) {
+      console.error('Erreur like:', err);
+    } finally {
+      setLikeLoading(false);
+    }
+  };
+
+  return (
+    <Link to={`/profile/${user.id}`} className="user-card" style={{ display: 'block', textDecoration: 'none' }}>
+      <div className="user-card-image">
+        <img src={profilePhoto} alt={`${user.username} profile`} />
+        {user.is_online && <span className="status-indicator online"></span>}
+      </div>
+      <div className="user-card-info">
+        <h3>{user.first_name || user.username} {user.last_name || ''}, {age}</h3>
+        <p className="location">📍 {location}</p>
+        <div className="tags-container">
+          {tags.slice(0, 3).map((tag, index) => (
+            <span key={index} className="tag">{tag}</span>
+          ))}
+          {tags.length > 3 && <span className="tag">+{tags.length - 3}</span>}
+        </div>
+        <div className="card-footer">
+          <span className="fame-rating">🔥 {user.popularity_score || 0} Fame</span>
+          <button 
+            className={`like-btn ${isLiked ? 'liked' : ''}`} 
+            onClick={handleLike}
+            disabled={likeLoading}
+          >
+            {isLiked ? '❤️ Liked' : '🤍 Like'}
+          </button>
+        </div>
+      </div>
+    </Link>
+  );
+}
+
+export default UserCard;
+
+
+=== FILE: ./frontend/src/config/api.js ===
+
+// Configuration de l'URL de l'API
+
+const API_URL = import.meta.env.VITE_API_URL;
+
+export default API_URL;
+
+=== FILE: ./frontend/src/context/AuthContext.jsx ===
+
+import { createContext, useContext, useState, useEffect } from 'react';
+import API_URL from '../config/api';
+
+const AuthContext = createContext();
+
+export const useAuth = () => useContext(AuthContext);
+
+export const AuthProvider = ({ children }) => {
+  const [user, setUser] = useState(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const checkLoggedIn = async () => {
+      const token = localStorage.getItem('token');
+      if (token) {
+        try {
+          const response = await fetch(`${API_URL}/profile/me`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (response.ok) {
+            const userData = await response.json();
+            setUser(userData);
+            setIsAuthenticated(true);
+          } else {
+            logout();
+          }
+        } catch (error) {
+          logout();
+        }
+      }
+      setLoading(false);
+    };
+    checkLoggedIn();
+  }, []);
+
+  const login = async (username, password) => {
+    try {
+      const response = await fetch(`${API_URL}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Erreur');
+      localStorage.setItem('token', data.token);
+      setUser(data.user);
+      setIsAuthenticated(true);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  };
+
+  const register = async (userData) => {
+    try {
+      const response = await fetch(`${API_URL}/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(userData)
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Erreur');
+      return { success: true, message: data.message };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  };
+
+  const logout = () => {
+    localStorage.removeItem('token');
+    setUser(null);
+    setIsAuthenticated(false);
+  };
+
+  return (
+    <AuthContext.Provider value={{ user, isAuthenticated, loading, login, register, logout }}>
+      {children}
+    </AuthContext.Provider>
+  );
+};
+
+=== FILE: ./frontend/src/context/NotificationContext.jsx ===
+
+import { createContext, useState, useContext, useEffect } from 'react';
+import { useSocket } from './SocketContext';
+import { useLocation } from 'react-router-dom';
+import API_URL from '../config/api';
+
+export const NotificationContext = createContext(null);
+
+export const NotificationProvider = ({ children }) => {
+  const [notifications, setNotifications] = useState([]);
+  const [toastMessage, setToastMessage] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const socket = useSocket();
+
+  const token = localStorage.getItem('token');
+  const unreadCount = notifications.filter(n => !n.is_read).length;
+
+  useEffect(() => {
+    if (!socket) return;
+
+    socket.on('notification', (notification) => {
+      setNotifications(prev => [notification, ...prev]);
+      setToastMessage(notification.content);
+      setTimeout(() => setToastMessage(null), 4000);
+    });
+
+    return () => {
+      socket.off('notification');
+    };
+  }, [socket]);
+
+  const fetchNotifications = async () => {
+    if (!token) return;
+    
+    try {
+      const response = await fetch(`${API_URL}/notifications`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setNotifications(data);
+      }
+    } catch (err) {
+      console.error('Erreur récupération notifications:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchNotifications();
+  }, [token]);
+
+  const markAsRead = async (notificationId) => {
+    try {
+      const response = await fetch(`${API_URL}/notifications/${notificationId}/read`, {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.ok) {
+        setNotifications(prev => 
+          prev.map(n => n.id === notificationId ? { ...n, is_read: true } : n)
+        );
+      }
+    } catch (err) {
+      console.error('Erreur marquage lu:', err);
+    }
+  };
+
+  const markAllAsRead = async () => {
+    try {
+      const response = await fetch(`${API_URL}/notifications/read-all`, {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.ok) {
+        setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
+      }
+    } catch (err) {
+      console.error('Erreur marquage tout lu:', err);
+    }
+  };
+
+  const deleteNotification = async (notificationId) => {
+    try {
+      const response = await fetch(`${API_URL}/notifications/${notificationId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.ok) {
+        setNotifications(prev => prev.filter(n => n.id !== notificationId));
+      }
+    } catch (err) {
+      console.error('Erreur suppression notification:', err);
+    }
+  };
+
+  const triggerToast = (message) => {
+    setToastMessage(message);
+    setTimeout(() => setToastMessage(null), 4000);
+  };
+
+  return (
+    <NotificationContext.Provider value={{ 
+      notifications, 
+      unreadCount,
+      loading,
+      markAsRead, 
+      markAllAsRead,
+      deleteNotification,
+      triggerToast, 
+      toastMessage,
+      refreshNotifications: fetchNotifications
+    }}>
+      {children}
+    </NotificationContext.Provider>
+  );
+};
+
+export const useNotifications = () => useContext(NotificationContext);
+
+
+=== FILE: ./frontend/src/context/OnlineStatusContext.jsx ===
+
+import { createContext, useContext, useState, useEffect } from 'react';
+import { io } from 'socket.io-client';
+import API_URL from '../config/api';
+
+const OnlineStatusContext = createContext(null);
+
+export const useOnlineStatus = () => useContext(OnlineStatusContext);
+
+export const OnlineStatusProvider = ({ children }) => {
+  const [onlineUsers, setOnlineUsers] = useState({});
+  const token = localStorage.getItem('token');
+
+  useEffect(() => {
+    if (!token) return;
+
+    const socket = io(API_URL.replace('/api', ''), {
+      auth: { token }
+    });
+
+    socket.on('user_status', (data) => {
+      setOnlineUsers(prev => ({ ...prev, [data.userId]: data.isOnline }));
+    });
+
+    return () => socket.close();
+  }, [token]);
+
+  const isOnline = (userId) => onlineUsers[userId] || false;
+
+  return (
+    <OnlineStatusContext.Provider value={{ isOnline, onlineUsers }}>
+      {children}
+    </OnlineStatusContext.Provider>
+  );
+};
+
+
+=== FILE: ./frontend/src/context/SocketContext.jsx ===
+
+import { createContext, useContext, useEffect, useState } from 'react';
+import { io } from 'socket.io-client';
+import { useAuth } from './AuthContext';
+import API_URL from '../config/api';
+
+const SocketContext = createContext();
+
+export const useSocket = () => useContext(SocketContext);
+
+export const SocketProvider = ({ children }) => {
+  const [socket, setSocket] = useState(null);
+  const { isAuthenticated } = useAuth();
+  const baseUrl = API_URL.replace('/api', '');
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      const token = localStorage.getItem('token'); // Modifié ici
+      const newSocket = io(baseUrl, {
+        auth: { token },
+        reconnection: true
+      });
+
+      setSocket(newSocket);
+
+      return () => newSocket.close();
+    } else {
+      if (socket) socket.close();
+      setSocket(null);
+    }
+  }, [isAuthenticated]);
+
+  return (
+    <SocketContext.Provider value={socket}>
+      {children}
+    </SocketContext.Provider>
+  );
+};
+
+=== FILE: ./frontend/src/layouts/MainLayout.jsx ===
+
+import { useState, useRef, useEffect } from 'react';
+import { Outlet, Link, useNavigate, useLocation, Navigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+import { useNotifications } from '../context/NotificationContext';
+import NotificationBell from '../components/NotificationBell';
+import Avatar from '../components/Avatar';
+import '../assets/css/layout.css';
+import '../assets/css/notification.css';
+
+function MainLayout() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { user, logout } = useAuth();
+  const { toastMessage } = useNotifications();
+  
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
+  const dropdownRef = useRef(null);
+
+  const isProfileIncomplete = user && (
+    !user.gender || 
+    !user.bio || 
+    !user.birth_date || 
+    !user.location_city || 
+    !user.profile_photo || 
+    !user.tags || 
+    user.tags.length === 0
+  );
+
+  if (isProfileIncomplete && location.pathname !== '/profile') {
+    return <Navigate to="/profile" replace />;
+  }
+
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const handleLogoutConfirm = () => {
+    setIsLogoutModalOpen(false);
+    logout();
+    navigate('/login');
+  };
+
+  return (
+    <div className="layout-container">
+      <header className="navbar">
+        <div className="nav-brand">
+          <Link to="/search">Matcha</Link>
+        </div>
+        
+        <div className="nav-links">
+          <Link to="/search">Recherche</Link>
+          <Link to="/chat">Messages</Link>
+          <NotificationBell />
+          
+          {user && (
+            <div className="user-menu-container" ref={dropdownRef}>
+              <div 
+                className="avatar-trigger" 
+                onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+              >
+                <Avatar user={user} size="sm" />
+              </div>
+
+              {isDropdownOpen && (
+                <div className="avatar-dropdown">
+                  <div className="dropdown-header">
+                    <strong>{user.username}</strong>
+                  </div>
+                  <button onClick={() => { setIsDropdownOpen(false); navigate('/profile'); }}>
+                    ⚙️ Paramètres
+                  </button>
+                  <button className="dropdown-logout" onClick={() => { setIsDropdownOpen(false); setIsLogoutModalOpen(true); }}>
+                    🚪 Déconnexion
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </header>
+      
+      <main className="main-content">
+        {isProfileIncomplete && location.pathname === '/profile' && (
+          <div style={{ backgroundColor: '#ff9800', color: 'white', padding: '1rem', textAlign: 'center', fontWeight: 'bold' }}>
+            ⚠️ Vous devez remplir TOUTES vos informations (Bio, Genre, Localisation, au moins 1 Tag et 1 Photo) pour utiliser le site.
+          </div>
+        )}
+        <Outlet />
+      </main>
+      
+      <footer className="footer">
+        <p>© 2026 Matcha. Parce que l'amour aussi, ça s'industrialise.</p>
+      </footer>
+
+      {toastMessage && (
+        <div className="toast-container">
+          {toastMessage}
+        </div>
+      )}
+
+      {isLogoutModalOpen && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <h3>Partir si tôt ? ☕</h3>
+            <p>Voulez-vous vraiment vous déconnecter ?</p>
+            <div className="modal-actions">
+              <button className="btn-cancel" onClick={() => setIsLogoutModalOpen(false)}>
+                Non, annuler
+              </button>
+              <button className="btn-confirm" onClick={handleLogoutConfirm}>
+                Oui, me déconnecter
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default MainLayout;
+
+=== FILE: ./frontend/src/main.jsx ===
+
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import App from './App.jsx';
+import './assets/css/global.css';
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+);
+
+=== FILE: ./frontend/src/pages/Chat.jsx ===
+
+import { useState, useEffect, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
+import { useSocket } from '../context/SocketContext';
+import API_URL from '../config/api';
+import '../assets/css/chat.css';
+
+function Chat() {
+  const [activeMatch, setActiveMatch] = useState(null);
+  const [messageText, setMessageText] = useState('');
+  const [messages, setMessages] = useState({});
+  const [matches, setMatches] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const messagesEndRef = useRef(null);
+  const socket = useSocket();
+  const location = useLocation();
+  
+  const token = localStorage.getItem('token');
+
+  // Gestion des événements WebSockets
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleNewMessage = (message) => {
+      const otherUserId = message.from_user_id === socket.userId 
+        ? message.to_user_id 
+        : message.from_user_id;
+      
+      setMessages(prev => ({
+        ...prev,
+        [otherUserId]: [...(prev[otherUserId] || []), message]
+      }));
+      
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 100);
+      
+      if (activeMatch?.id === otherUserId) {
+        socket.emit('mark_read', { fromUserId: otherUserId });
+      }
+    };
+
+    const handleUserStatus = (data) => {
+      setMatches(prev => prev.map(match => 
+        match.id === data.userId 
+          ? { ...match, is_online: data.isOnline }
+          : match
+      ));
+      
+      if (activeMatch && activeMatch.id === data.userId) {
+        setActiveMatch(prev => ({ ...prev, is_online: data.isOnline }));
+      }
+    };
+
+    socket.on('new_message', handleNewMessage);
+    socket.on('user_status', handleUserStatus);
+
+    return () => {
+      socket.off('new_message', handleNewMessage);
+      socket.off('user_status', handleUserStatus);
+    };
+  }, [socket, activeMatch]);
+
+  // Récupération de la liste des matchs
+  useEffect(() => {
+    const fetchMatches = async () => {
+      try {
+        const response = await fetch(`${API_URL}/likes/matches`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          setMatches(data);
+        }
+      } catch (err) {
+        // Erreur ignorée silencieusement pour la console
+      }
+    };
+    
+    if (token) {
+      fetchMatches();
+    }
+  }, [token]);
+
+  // Ouverture automatique si on vient du profil d'un match (via navigate state)
+  useEffect(() => {
+    if (matches.length > 0 && location.state?.matchId) {
+      const matchToSelect = matches.find(m => m.id === location.state.matchId);
+      if (matchToSelect && (!activeMatch || activeMatch.id !== matchToSelect.id)) {
+        selectMatch(matchToSelect);
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [matches, location.state]);
+
+  const fetchConversation = async (userId) => {
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/messages/${userId}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setMessages(prev => ({
+          ...prev,
+          [userId]: data
+        }));
+      }
+    } catch (err) {
+      // Ignoré silencieusement
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const selectMatch = async (match) => {
+    setActiveMatch(match);
+    
+    if (!messages[match.id]) {
+      await fetchConversation(match.id);
+    }
+    
+    if (socket) {
+      socket.emit('mark_read', { fromUserId: match.id });
+    }
+  };
+
+  const handleSendMessage = async (e) => {
+    e.preventDefault();
+    if (!messageText.trim() || !activeMatch || !socket) return;
+    
+    const newMessage = {
+      toUserId: activeMatch.id,
+      content: messageText
+    };
+    
+    socket.emit('send_message', newMessage, (response) => {
+      if (response && response.success) {
+        setMessages(prev => ({
+          ...prev,
+          [activeMatch.id]: [...(prev[activeMatch.id] || []), response.message]
+        }));
+        
+        setMessageText('');
+        
+        setTimeout(() => {
+          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }, 100);
+      } else if (response && response.error) {
+        alert(response.error);
+      }
+    });
+  };
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, activeMatch]);
+
+  const formatTime = (dateStr) => {
+    if (!dateStr) return '';
+    const date = new Date(dateStr);
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
+  const getProfilePhoto = (match) => {
+    if (match.profile_photo) {
+      return `${API_URL.replace('/api', '')}${match.profile_photo}`;
+    }
+    return `https://ui-avatars.com/api/?background=8baa5e&color=fff&rounded=true&name=${encodeURIComponent(match.first_name || match.username || 'User')}`;
+  };
+
+  if (matches.length === 0) {
+    return (
+      <div className="chat-container">
+        <div className="empty-chat">
+          <h3>Pas encore de matchs</h3>
+          <p>Commencez à liker des profils pour pouvoir discuter !</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="chat-container">
+      <div className="chat-sidebar">
+        <div className="chat-sidebar-header">
+          <h2>Vos Matchs ({matches.length})</h2>
+        </div>
+        <div className="matches-list">
+          {matches.map(match => (
+            <div 
+              key={match.id} 
+              className={`match-item ${activeMatch?.id === match.id ? 'active' : ''}`}
+              onClick={() => selectMatch(match)}
+            >
+              <img 
+                src={getProfilePhoto(match)} 
+                alt={match.username} 
+              />
+              <div className="match-info">
+                <h4>{match.first_name} {match.last_name}</h4>
+                <p>@{match.username}</p>
+                {match.is_online && <span className="online-badge">🟢 En ligne</span>}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="chat-main">
+        {activeMatch ? (
+          <>
+            <div className="chat-header">
+              <img 
+                src={getProfilePhoto(activeMatch)} 
+                alt={activeMatch.username} 
+              />
+              <div className="chat-header-info">
+                <h3>{activeMatch.first_name} {activeMatch.last_name}</h3>
+                <p>@{activeMatch.username}</p>
+                {activeMatch.is_online ? (
+                  <span className="online-badge">🟢 En ligne</span>
+                ) : (
+                  <span className="offline-badge">⚪ Hors ligne</span>
+                )}
+              </div>
+            </div>
+            
+            <div className="chat-messages">
+              {loading ? (
+                <div className="loading-messages">Chargement de l'historique...</div>
+              ) : (
+                <>
+                  {(messages[activeMatch.id] || []).map((msg, idx) => (
+                    <div 
+                      key={msg.id || idx} 
+                      className={`message-bubble ${msg.from_user_id === activeMatch.id ? 'received' : 'sent'}`}
+                    >
+                      <p>{msg.content}</p>
+                      <span className="message-time">{formatTime(msg.created_at)}</span>
+                    </div>
+                  ))}
+                  <div ref={messagesEndRef} />
+                </>
+              )}
+            </div>
+
+            <form className="chat-input-area" onSubmit={handleSendMessage}>
+              <input 
+                type="text" 
+                placeholder="Écrivez un message..." 
+                value={messageText}
+                onChange={(e) => setMessageText(e.target.value)}
+              />
+              <button type="submit" className="send-btn" disabled={!socket}>
+                Envoyer
+              </button>
+            </form>
+          </>
+        ) : (
+          <div className="empty-chat">
+            <h3>Sélectionnez un match pour discuter</h3>
+            <p>La conversation n'attend plus que vous...</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default Chat;
+
+=== FILE: ./frontend/src/pages/Login.jsx ===
+
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+import API_URL from '../config/api';
+import '../assets/css/login.css';
+
+function Login() {
+  const [view, setView] = useState('login'); // 'login', 'register', 'forgot'
+  const [formData, setFormData] = useState({
+    username: '', password: '', confirmPassword: '', email: '', firstName: '', lastName: ''
+  });
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const [loading, setLoading] = useState(false);
+  
+  const { login, register } = useAuth();
+  const navigate = useNavigate();
+
+  const handleChange = (e) => {
+    setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
+
+  const validatePassword = (pwd) => {
+    const forbiddenWords = ['password', 'coffee', 'love', '123456', 'azerty', 'qwerty'];
+    const lowerPwd = pwd.toLowerCase();
+    if (forbiddenWords.some(word => lowerPwd.includes(word))) return false;
+    const regex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/;
+    return regex.test(pwd);
+  };
+
+  const handleForgotSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setMessage('');
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/auth/forgot-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: formData.email })
+      });
+      const data = await response.json();
+      setMessage(data.message);
+    } catch (err) {
+      setError("Une erreur est survenue.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setMessage('');
+    setLoading(true);
+
+    if (view === 'login') {
+      const result = await login(formData.username, formData.password);
+      if (result.success) {
+        navigate('/search');
+      } else {
+        setError(result.error);
+      }
+    } else if (view === 'register') {
+      if (formData.password !== formData.confirmPassword) {
+        setError('Les deux mots de passe ne sont pas identiques.');
+        setLoading(false);
+        return;
+      }
+      if (!validatePassword(formData.password)) {
+        setError('Le mot de passe doit contenir au moins 8 caractères, une majuscule, un chiffre, et aucun mot commun.');
+        setLoading(false);
+        return;
+      }
+      const result = await register({
+        username: formData.username, password: formData.password, email: formData.email, firstName: formData.firstName, lastName: formData.lastName
+      });
+      if (result.success) {
+        setMessage(result.message || 'Inscription réussie. Veuillez vérifier votre email.');
+        setView('login');
+        setFormData({ username: '', password: '', confirmPassword: '', email: '', firstName: '', lastName: '' });
+      } else {
+        setError(result.error);
+      }
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div className="login-container">
+      <div className="login-card">
+        <h1>Matcha</h1>
+        <h2>
+          {view === 'login' && 'Connexion'}
+          {view === 'register' && 'Inscription'}
+          {view === 'forgot' && 'Mot de passe oublié'}
+        </h2>
+        
+        {error && <div className="error-message">{error}</div>}
+        {message && <div className="success-message">{message}</div>}
+
+        {view === 'forgot' ? (
+          <form onSubmit={handleForgotSubmit}>
+            <input type="email" name="email" placeholder="Votre Email" value={formData.email} onChange={handleChange} required />
+            <button type="submit" disabled={loading}>{loading ? 'Envoi...' : 'Envoyer le lien'}</button>
+            <p className="toggle-auth" onClick={() => { setView('login'); setError(''); setMessage(''); }}>
+              Retour à la connexion
+            </p>
+          </form>
+        ) : (
+          <form onSubmit={handleSubmit}>
+            {view === 'register' && (
+              <div className="name-grid">
+                <input type="text" name="firstName" placeholder="Prénom" value={formData.firstName} onChange={handleChange} required />
+                <input type="text" name="lastName" placeholder="Nom" value={formData.lastName} onChange={handleChange} required />
+              </div>
+            )}
+            
+            {view === 'register' && (
+              <input type="email" name="email" placeholder="Email" value={formData.email} onChange={handleChange} required />
+            )}
+
+            <input type="text" name="username" placeholder="Nom d'utilisateur" value={formData.username} onChange={handleChange} required />
+            
+            <input type="password" name="password" placeholder="Mot de passe" value={formData.password} onChange={handleChange} required />
+
+            {view === 'register' && (
+              <input type="password" name="confirmPassword" placeholder="Confirmer le mot de passe" value={formData.confirmPassword} onChange={handleChange} required />
+            )}
+
+            <button type="submit" disabled={loading}>
+              {loading ? 'Chargement...' : (view === 'login' ? 'Se connecter' : 'S\'inscrire')}
+            </button>
+          </form>
+        )}
+
+        {view === 'login' && (
+          <>
+            <p className="toggle-auth" onClick={() => { setView('forgot'); setError(''); setMessage(''); }}>
+              Mot de passe oublié ?
+            </p>
+            <p className="toggle-auth" onClick={() => { setView('register'); setError(''); setMessage(''); }}>
+              Pas encore de compte ? S'inscrire
+            </p>
+          </>
+        )}
+        {view === 'register' && (
+          <p className="toggle-auth" onClick={() => { setView('login'); setError(''); setMessage(''); }}>
+            Déjà un compte ? Se connecter
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default Login;
+
+=== FILE: ./frontend/src/pages/Profile.jsx ===
+
+import { useState, useEffect } from 'react';
+import { useAuth } from '../context/AuthContext';
+import { useNavigate } from 'react-router-dom';
+import API_URL from '../config/api';
+import '../assets/css/profile.css';
+
+function Profile() {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const [activeTab, setActiveTab] = useState('edit');
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState({ type: '', text: '' });
+  
+  const [profileData, setProfileData] = useState({ 
+    gender: '', sexualPreferences: 'bisexual', bio: '', locationCity: '',
+    firstName: '', lastName: '', email: '', birthDate: ''
+  });
+  
+  const [tags, setTags] = useState([]);
+  const [availableTags, setAvailableTags] = useState([]);
+  const [selectedTag, setSelectedTag] = useState('');
+  const [photos, setPhotos] = useState([]);
+  const [mainPhotoId, setMainPhotoId] = useState(null);
+  const [viewers, setViewers] = useState([]);
+  const [likers, setLikers] = useState([]);
+  const [showPreview, setShowPreview] = useState(false);
+
+  const token = localStorage.getItem('token');
+
+  const getPhotoUrl = (photo, isExternal) => {
+    if (!photo) return '/default-avatar.png';
+    if (isExternal) return photo;
+    const baseUrl = API_URL.replace('/api', '');
+    return `${baseUrl}${photo}`;
+  };
+  
+  const fetchAvailableTags = async () => {
+    try {
+      const response = await fetch(`${API_URL}/tags`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setAvailableTags(data);
+      }
+    } catch (err) {}
+  };
+
+  const fetchProfile = async () => {
+    try {
+      const response = await fetch(`${API_URL}/profile/me`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setProfileData({
+          gender: data.gender || '',
+          sexualPreferences: data.sexual_preferences || 'bisexual',
+          bio: data.bio || '',
+          locationCity: data.location_city || '',
+          firstName: data.first_name || '',
+          lastName: data.last_name || '',
+          email: data.email || '',
+          birthDate: data.birth_date ? data.birth_date.split('T')[0] : ''
+        });
+      }
+    } catch (err) {}
+  };
+
+  const fetchUserTags = async () => {
+    try {
+      const response = await fetch(`${API_URL}/tags/me`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setTags(data.map(t => `#${t.name}`));
+      }
+    } catch (err) {}
+  };
+
+  const fetchUserPhotos = async () => {
+    try {
+      const response = await fetch(`${API_URL}/photos/me`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setPhotos(data);
+        const profilePhoto = data.find(p => p.is_profile);
+        if (profilePhoto) setMainPhotoId(profilePhoto.id);
+      }
+    } catch (err) {}
+  };
+
+  const fetchVisitors = async () => {
+    try {
+      const response = await fetch(`${API_URL}/profile/visitors`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setViewers(data);
+      }
+    } catch (err) {}
+  };
+
+  const fetchLikers = async () => {
+    try {
+      const response = await fetch(`${API_URL}/likes/received`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setLikers(data);
+      }
+    } catch (err) {}
+  };
+
+  useEffect(() => {
+    fetchProfile();
+    fetchUserTags();
+    fetchAvailableTags();
+    fetchUserPhotos();
+    fetchVisitors();
+    fetchLikers();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleInputChange = (e) => {
+    setProfileData(prev => ({ ...prev, [e.target.name]: e.target.value }));
+  };
+
+  const handleProfileSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const response = await fetch(`${API_URL}/profile/me`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(profileData)
+      });
+      if (response.ok) {
+        setMessage({ type: 'success', text: 'Profil mis à jour' });
+      } else {
+        const data = await response.json();
+        setMessage({ type: 'error', text: data.error || 'Erreur' });
+      }
+    } catch (err) {
+      setMessage({ type: 'error', text: 'Erreur serveur' });
+    }
+    setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+  };
+
+  const addTagFromSelect = async () => {
+    if (!selectedTag) return;
+    const tagName = selectedTag.replace('#', '');
+    if (tags.includes(`#${tagName}`)) {
+      setMessage({ type: 'error', text: 'Tag déjà ajouté' });
+      setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+      return;
+    }
+    try {
+      const response = await fetch(`${API_URL}/tags/me`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ tagName })
+      });
+      if (response.ok) {
+        setTags([...tags, `#${tagName}`]);
+        setSelectedTag('');
+        setMessage({ type: 'success', text: 'Tag ajouté' });
+      } else {
+        const error = await response.json();
+        setMessage({ type: 'error', text: error.error || 'Erreur' });
+      }
+    } catch (err) {}
+    setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+  };
+
+  const removeTag = async (indexToRemove) => {
+    const tagToRemove = tags[indexToRemove].substring(1);
+    try {
+      const response = await fetch(`${API_URL}/tags/me/${tagToRemove}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (response.ok) {
+        setTags(tags.filter((_, index) => index !== indexToRemove));
+        setMessage({ type: 'success', text: 'Tag supprimé' });
+      }
+    } catch (err) {}
+    setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+  };
+
+  const handlePhotoUpload = async (e) => {
+    const files = Array.from(e.target.files);
+    if (photos.length + files.length > 5) {
+      setMessage({ type: 'error', text: 'Maximum 5 photos' });
+      setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+      return;
+    }
+    setLoading(true);
+    for (const file of files) {
+      const formData = new FormData();
+      formData.append('photo', file);
+      try {
+        const response = await fetch(`${API_URL}/photos/upload`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` },
+          body: formData
+        });
+        if (response.ok) {
+          const data = await response.json();
+          setPhotos(prev => [...prev, data.photo]);
+          if (data.photo.is_profile) setMainPhotoId(data.photo.id);
+          setMessage({ type: 'success', text: 'Photo ajoutée' });
+        } else {
+          const error = await response.json();
+          setMessage({ type: 'error', text: error.error });
+        }
+      } catch (err) {}
+    }
+    setLoading(false);
+    setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+  };
+
+  const setMainPhoto = async (photoId) => {
+    try {
+      const response = await fetch(`${API_URL}/photos/profile/${photoId}`, {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (response.ok) {
+        setMainPhotoId(photoId);
+        setPhotos(photos.map(p => ({ ...p, is_profile: p.id === photoId })));
+        setMessage({ type: 'success', text: 'Photo de profil mise à jour' });
+      }
+    } catch (err) {}
+    setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+  };
+
+  const removePhoto = async (photoId, index) => {
+    try {
+      const response = await fetch(`${API_URL}/photos/${photoId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (response.ok) {
+        setPhotos(photos.filter((_, i) => i !== index));
+        if (mainPhotoId === photoId) setMainPhotoId(null);
+        setMessage({ type: 'success', text: 'Photo supprimée' });
+      }
+    } catch (err) {}
+    setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+  };
+
+  const handleGetLocation = () => {
+    setLoading(true);
+    setMessage({ type: 'info', text: '📍 Localisation en cours...' });
+
+    const saveLocationToDB = async (lat, lon, cityStr) => {
+      try {
+        const gpsResponse = await fetch(`${API_URL}/location/gps`, {
+          method: 'PUT',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ latitude: lat, longitude: lon, city: cityStr })
+        });
+        if (!gpsResponse.ok) throw new Error('Erreur API');
+        setProfileData(prev => ({ ...prev, locationCity: cityStr }));
+        await fetch(`${API_URL}/profile/me`, {
+          method: 'PUT',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ ...profileData, locationCity: cityStr })
+        });
+        setMessage({ type: 'success', text: `📍 Localisation mise à jour : ${cityStr}` });
+      } catch (err) {
+        setMessage({ type: 'error', text: '❌ Erreur de sauvegarde' });
+      } finally {
+        setLoading(false);
+        setTimeout(() => setMessage({ type: '', text: '' }), 4000);
+      }
+    };
+
+    const fallbackToIP = async () => {
+      try {
+        const res = await fetch('https://ipapi.co/json/');
+        const data = await res.json();
+        if (data.latitude && data.longitude) {
+          saveLocationToDB(data.latitude, data.longitude, data.city || 'Position IP');
+        } else {
+          throw new Error('IP API failed');
+        }
+      } catch (err) {
+        setMessage({ type: 'error', text: '❌ Impossible de vous localiser.' });
+        setLoading(false);
+        setTimeout(() => setMessage({ type: '', text: '' }), 4000);
+      }
+    };
+
+    if ("geolocation" in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        async (pos) => {
+          try {
+            const { latitude, longitude } = pos.coords;
+            const geoResponse = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=10&addressdetails=1`);
+            let city = `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+            if (geoResponse.ok) {
+              const geoData = await geoResponse.json();
+              if (geoData.address) {
+                city = geoData.address.city || geoData.address.town || geoData.address.village || geoData.address.suburb || geoData.address.county || city;
+              }
+            }
+            saveLocationToDB(latitude, longitude, city);
+          } catch (e) {
+            fallbackToIP();
+          }
+        },
+        () => {
+          fallbackToIP();
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+      );
+    } else {
+      fallbackToIP();
+    }
+  };
+
+  return (
+    <div className="profile-container">
+      <div className="profile-header">
+        <h2>Mon Profil</h2>
+        <button className="preview-btn" onClick={() => setShowPreview(true)}>Voir l'aperçu public</button>
+      </div>
+
+      {message.text && (
+        <div className={`message-banner ${message.type}`}>
+          {message.text}
+        </div>
+      )}
+
+      <div className="profile-tabs">
+        <button className={`tab-btn ${activeTab === 'edit' ? 'active' : ''}`} onClick={() => setActiveTab('edit')}>Informations</button>
+        <button className={`tab-btn ${activeTab === 'photos' ? 'active' : ''}`} onClick={() => setActiveTab('photos')}>Photos</button>
+        <button className={`tab-btn ${activeTab === 'tags' ? 'active' : ''}`} onClick={() => setActiveTab('tags')}>Tags</button>
+        <button className={`tab-btn ${activeTab === 'history' ? 'active' : ''}`} onClick={() => setActiveTab('history')}>Historique</button>
+      </div>
+
+      {activeTab === 'edit' && (
+        <div className="profile-section">
+          <form onSubmit={handleProfileSubmit}>
+            <div className="form-grid">
+              <div className="form-group">
+                <label>Prénom</label>
+                <input type="text" name="firstName" value={profileData.firstName} onChange={handleInputChange} required />
+              </div>
+              <div className="form-group">
+                <label>Nom</label>
+                <input type="text" name="lastName" value={profileData.lastName} onChange={handleInputChange} required />
+              </div>
+              <div className="form-group">
+                <label>Email</label>
+                <input type="email" name="email" value={profileData.email} onChange={handleInputChange} required />
+              </div>
+              <div className="form-group">
+                <label>Date de naissance</label>
+                <input type="date" name="birthDate" value={profileData.birthDate} onChange={handleInputChange} required />
+              </div>
+              <div className="form-group">
+                <label>Genre</label>
+                <select name="gender" value={profileData.gender} onChange={handleInputChange} required>
+                  <option value="">Sélectionner</option>
+                  <option value="male">Homme</option>
+                  <option value="female">Femme</option>
+                  <option value="other">Autre</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label>Préférence</label>
+                <select name="sexualPreferences" value={profileData.sexualPreferences} onChange={handleInputChange}>
+                  <option value="male">Hommes</option>
+                  <option value="female">Femmes</option>
+                  <option value="bisexual">Les deux</option>
+                </select>
+              </div>
+              <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                <label>Biographie</label>
+                <textarea name="bio" value={profileData.bio} onChange={handleInputChange} required />
+              </div>
+            </div>
+            
+            <div className="location-container" style={{ marginTop: '1.5rem' }}>
+              <label>Localisation actuelle : {profileData.locationCity || 'Non définie'}</label>
+              <button type="button" className="gps-btn" onClick={handleGetLocation} disabled={loading}>
+                Mettre à jour ma position GPS
+              </button>
+            </div>
+
+            <button type="submit" className="save-btn" disabled={loading}>Sauvegarder les modifications</button>
+          </form>
+        </div>
+      )}
+
+      {activeTab === 'photos' && (
+        <div className="profile-section">
+          <div className="upload-btn-wrapper">
+            <button className="upload-btn">Ajouter une photo (Max 5)</button>
+            <input type="file" accept="image/jpeg, image/png, image/jpg" multiple onChange={handlePhotoUpload} disabled={loading || photos.length >= 5} />
+          </div>
+          <div className="photos-grid">
+            {photos.map((p, index) => (
+              <div key={p.id} className={`photo-preview-card ${p.is_profile ? 'is-main' : ''}`}>
+                {p.is_profile && <span className="main-badge">Principale</span>}
+                <img src={getPhotoUrl(p.url, p.is_external)} alt={`Photo ${index}`} />
+                <div className="photo-actions">
+                  {!p.is_profile && <button className="photo-action-btn" onClick={() => setMainPhoto(p.id)}>Définir</button>}
+                  <button className="photo-action-btn delete" onClick={() => removePhoto(p.id, index)}>X</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'tags' && (
+        <div className="profile-section">
+          <div className="tags-input-container">
+            {tags.map((tag, index) => (
+              <div key={index} className="tag-pill">
+                {tag} <button className="tag-remove" onClick={() => removeTag(index)}>&times;</button>
+              </div>
+            ))}
+          </div>
+          <div className="add-tag-select">
+            <input type="text" value={selectedTag} onChange={(e) => setSelectedTag(e.target.value)} placeholder="Nouveau tag (ex: 42paris)" />
+            <button className="add-tag-btn" onClick={addTagFromSelect}>Ajouter</button>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'history' && (
+        <div className="profile-section">
+          <h3>Derniers Visiteurs</h3>
+          <div className="history-list">
+            {viewers.length > 0 ? viewers.map((v, i) => (
+              <div key={i} className="history-item" onClick={() => navigate(`/profile/${v.visitor_id}`)}>
+                <img src={getPhotoUrl(v.profile_photo, false)} alt={v.username} />
+                <div className="history-info">
+                  <h4>{v.first_name}</h4>
+                  <p>@{v.username} - {new Date(v.viewed_at).toLocaleDateString()}</p>
+                </div>
+              </div>
+            )) : <p className="empty-message">Aucun visiteur pour le moment.</p>}
+          </div>
+
+          <h3 style={{ marginTop: '2rem' }}>Derniers Likes reçus</h3>
+          <div className="history-list">
+            {likers.length > 0 ? likers.map((l, i) => (
+              <div key={i} className="history-item" onClick={() => navigate(`/profile/${l.from_user_id}`)}>
+                <img src={getPhotoUrl(l.profile_photo, false)} alt={l.username} />
+                <div className="history-info">
+                  <h4>{l.first_name}</h4>
+                  <p>@{l.username} - {new Date(l.created_at).toLocaleDateString()}</p>
+                </div>
+              </div>
+            )) : <p className="empty-message">Aucun like pour le moment.</p>}
+          </div>
+        </div>
+      )}
+
+      {showPreview && (
+        <div className="preview-overlay" onClick={() => setShowPreview(false)}>
+          <div className="preview-container" onClick={e => e.stopPropagation()}>
+            <div className="preview-header">
+              <h3>Aperçu Public</h3>
+              <button className="close-preview" onClick={() => setShowPreview(false)}>&times;</button>
+            </div>
+            <div className="preview-content">
+              <div className="preview-photo">
+                <img src={getPhotoUrl(photos.find(p => p.is_profile)?.url, photos.find(p => p.is_profile)?.is_external)} alt="Profile" />
+              </div>
+              <div className="preview-info">
+                <h2>{profileData.firstName} {profileData.lastName}</h2>
+                <p className="preview-username">@{user?.username}</p>
+                <p className="preview-location">📍 {profileData.locationCity}</p>
+                <p className="preview-bio">"{profileData.bio}"</p>
+                <div className="preview-tags">
+                  {tags.map((t, i) => <span key={i} className="tag-pill">{t}</span>)}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default Profile;
+
+=== FILE: ./frontend/src/pages/PublicProfile.jsx ===
+
+import { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+import API_URL from '../config/api';
+import { calculateAge } from '../utils/age';
+import '../assets/css/publicProfile.css';
+
+function PublicProfile() {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const { user: currentUser } = useAuth();
+  
+  const [profile, setProfile] = useState(null);
+  const [photos, setPhotos] = useState([]);
+  const [isLiked, setIsLiked] = useState(false);
+  const [likesMe, setLikesMe] = useState(false);
+  const [isBlocked, setIsBlocked] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  const token = localStorage.getItem('token');
+
+  useEffect(() => {
+    if (parseInt(id) === currentUser?.id) {
+      navigate('/profile');
+      return;
+    }
+
+    const fetchProfileData = async () => {
+      try {
+        setLoading(true);
+        const profileRes = await fetch(`${API_URL}/profile/${id}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (!profileRes.ok) throw new Error('Profil indisponible ou bloqué');
+        const profileData = await profileRes.json();
+        setProfile(profileData);
+
+        const photosRes = await fetch(`${API_URL}/photos/user/${id}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (photosRes.ok) {
+          const photosData = await photosRes.json();
+          setPhotos(photosData);
+        }
+
+        const likeRes = await fetch(`${API_URL}/likes/check/${id}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (likeRes.ok) {
+          const likeData = await likeRes.json();
+          setIsLiked(likeData.liked);
+          setLikesMe(likeData.likesMe);
+        }
+
+        const blockRes = await fetch(`${API_URL}/blocks/check/${id}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (blockRes.ok) {
+          const blockData = await blockRes.json();
+          setIsBlocked(blockData.blocked);
+        }
+
+      } catch (err) {
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (id && token) {
+      fetchProfileData();
+    }
+  }, [id, token, currentUser, navigate]);
+
+  const handleLike = async () => {
+    try {
+      const method = isLiked ? 'DELETE' : 'POST';
+      const response = await fetch(`${API_URL}/likes/${id}`, {
+        method: method,
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (response.ok) {
+        setIsLiked(!isLiked);
+        const data = await response.json();
+        if (data.match) {
+          alert(`❤️ C'est un match avec ${profile.username} !`);
+        }
+      } else {
+        const errorData = await response.json();
+        alert(errorData.error);
+      }
+    } catch (err) {
+      alert("Une erreur est survenue.");
+    }
+  };
+
+  const handleBlock = async () => {
+    if (!window.confirm("Voulez-vous vraiment bloquer cet utilisateur ? Il disparaîtra de vos résultats.")) return;
+    
+    try {
+      const response = await fetch(`${API_URL}/blocks/${id}`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.ok) {
+        alert("Utilisateur bloqué.");
+        navigate('/search');
+      }
+    } catch (err) {
+      alert("Erreur lors du blocage.");
+    }
+  };
+
+  const handleReport = async () => {
+    if (!window.confirm("Signaler ce profil comme faux compte ?")) return;
+    
+    try {
+      const response = await fetch(`${API_URL}/reports/${id}`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.ok) {
+        alert("Profil signalé à l'administration.");
+      }
+    } catch (err) {
+      alert("Erreur lors du signalement.");
+    }
+  };
+
+  const getPhotoUrl = (photoUrl, isExternal) => {
+    if (!photoUrl) return '/default-avatar.png';
+    if (isExternal) return photoUrl;
+    return `${API_URL.replace('/api', '')}${photoUrl}`;
+  };
+
+  const formatLastSeen = (dateString) => {
+    if (!dateString) return "Inconnue";
+    const date = new Date(dateString);
+    return date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  };
+
+  if (loading) return <div className="loading-spinner">Chargement du profil...</div>;
+  if (error) return <div className="error-message">{error}</div>;
+  if (!profile) return <div className="error-message">Profil introuvable.</div>;
+
+  const age = calculateAge(profile.birth_date);
+  const isMatch = isLiked && likesMe;
+
+  return (
+    <div className="public-profile-container">
+      <div className="profile-header-main">
+        <div className="profile-name-area">
+          <h2>
+            {profile.first_name} {profile.last_name} ({age} ans)
+            <span className="fame-badge">🔥 {profile.popularity_score} Fame</span>
+          </h2>
+          <p>@{profile.username}</p>
+          <div className="status-text">
+            {profile.is_online ? (
+              <span className="status-online">🟢 En ligne</span>
+            ) : (
+              <span className="status-offline">⚪ Hors ligne (Vu le {formatLastSeen(profile.last_seen)})</span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="interaction-bar">
+        <div className="like-status-info">
+          {isMatch ? (
+            <span className="like-status-badge">💖 C'est un Match !</span>
+          ) : likesMe ? (
+            <span className="like-status-badge" style={{ backgroundColor: '#ffe4e6', color: '#e91e63', borderColor: '#e91e63' }}>
+              Cette personne vous a liké !
+            </span>
+          ) : null}
+        </div>
+
+        <div className="action-buttons">
+          {!isBlocked && (
+            <button className={`action-btn ${isLiked ? 'btn-unlike' : 'btn-like'}`} onClick={handleLike}>
+              {isLiked ? '💔 Retirer le like' : '🤍 Liker'}
+            </button>
+          )}
+          {isMatch && (
+            <button 
+              className="action-btn btn-chat" 
+              onClick={() => navigate('/chat', { state: { matchId: parseInt(id) } })} 
+              style={{ marginLeft: '10px' }}
+            >
+              💬 Discuter
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="public-photos">
+        {photos.length > 0 ? (
+          <img src={getPhotoUrl(photos.find(p => p.is_profile)?.url || photos[0].url, photos.find(p => p.is_profile)?.is_external || photos[0].is_external)} alt="Profile" />
+        ) : (
+          <div className="no-photo">Aucune photo</div>
+        )}
+      </div>
+
+      <div className="info-block">
+        <h3>📍 Localisation</h3>
+        <p>{profile.location_city || 'Lieu inconnu'}</p>
+      </div>
+
+      <div className="info-block">
+        <h3>📖 Biographie</h3>
+        <p>{profile.bio || 'Cet utilisateur n\'a pas encore de bio.'}</p>
+      </div>
+
+      <div className="info-block">
+        <h3>🏷️ Intérêts</h3>
+        <div className="tags-container">
+          {profile.tags && profile.tags.length > 0 ? (
+            profile.tags.map((tag, i) => (
+              <span key={i} className="tag">{tag}</span>
+            ))
+          ) : (
+            <p>Aucun intérêt renseigné.</p>
+          )}
+        </div>
+      </div>
+
+      <div className="danger-actions" style={{ marginTop: '3rem', borderTop: '1px solid #eee', paddingTop: '1rem' }}>
+        <button className="action-btn btn-danger" onClick={handleBlock}>🚫 Bloquer</button>
+        <button className="action-btn btn-danger" onClick={handleReport}>⚠️ Signaler un faux profil</button>
+      </div>
+    </div>
+  );
+}
+
+export default PublicProfile;
+
+=== FILE: ./frontend/src/pages/Search.jsx ===
+
+import { useState, useEffect } from 'react';
+import API_URL from '../config/api';
+import UserCard from '../components/UserCard';
+import { useAuth } from '../context/AuthContext';
+import '../assets/css/search.css';
+
+function Search() {
+  const { user } = useAuth();
+  const [originalUsers, setOriginalUsers] = useState([]);
+  const [displayedUsers, setDisplayedUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [isSearching, setIsSearching] = useState(false);
+  const [filters, setFilters] = useState({ 
+    ageMin: 18, ageMax: 80, popularityMin: 0, popularityMax: 1000, distance: 100, tags: '', orderBy: 'popularity_score', orderDirection: 'DESC'
+  });
+  
+  const token = localStorage.getItem('token');
+
+  const loadSuggestions = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/search/suggestions`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setOriginalUsers(data.suggestions || []);
+        setDisplayedUsers(data.suggestions || []);
+      }
+    } catch (err) {
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadSuggestions();
+  }, []);
+
+  const handleSearch = async () => {
+    setIsSearching(true);
+    setLoading(true);
+    try {
+      const searchParams = { ...filters };
+      if (user?.latitude && user?.longitude) {
+        searchParams.latitude = user.latitude;
+        searchParams.longitude = user.longitude;
+      }
+
+      const queryParams = new URLSearchParams(searchParams).toString();
+      const response = await fetch(`${API_URL}/search?${queryParams}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setOriginalUsers(data.users || []);
+        setDisplayedUsers(data.users || []);
+      }
+    } catch (err) {
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const calculateLocalDistance = (lat1, lon1, lat2, lon2) => {
+    const R = 6371;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + 
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+              Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  };
+
+  useEffect(() => {
+    if (originalUsers.length === 0) return;
+
+    let filtered = [...originalUsers];
+
+    const minAge = filters.ageMin === '' ? 18 : Number(filters.ageMin);
+    const maxAge = filters.ageMax === '' ? 100 : Number(filters.ageMax);
+    const minPop = filters.popularityMin === '' ? 0 : Number(filters.popularityMin);
+    const maxPop = filters.popularityMax === '' ? 1000 : Number(filters.popularityMax);
+
+    filtered = filtered.filter(u => u.age >= minAge && u.age <= maxAge);
+    filtered = filtered.filter(u => u.popularity_score >= minPop && u.popularity_score <= maxPop);
+    
+    if (user?.latitude && user?.longitude) {
+      filtered = filtered.filter(u => {
+        if (!u.latitude || !u.longitude) return false;
+        const dist = calculateLocalDistance(user.latitude, user.longitude, u.latitude, u.longitude);
+        return dist <= Number(filters.distance);
+      });
+    }
+
+    if (filters.tags.trim() !== '') {
+      const searchTags = filters.tags.split(',').map(t => t.trim().toLowerCase());
+      filtered = filtered.filter(u => {
+        if (!u.tags) return false;
+        const userTags = u.tags.map(t => t.replace('#', '').toLowerCase());
+        return searchTags.every(st => userTags.includes(st));
+      });
+    }
+
+    filtered.sort((a, b) => {
+      let valA = a[filters.orderBy];
+      let valB = b[filters.orderBy];
+      
+      if (filters.orderBy === 'common_tags') {
+        valA = a.common_tags || 0;
+        valB = b.common_tags || 0;
+      } else if (filters.orderBy === 'location_city') {
+        valA = a.location_city || '';
+        valB = b.location_city || '';
+        return filters.orderDirection === 'ASC' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+      }
+      
+      return filters.orderDirection === 'ASC' ? valA - valB : valB - valA;
+    });
+
+    setDisplayedUsers(filtered);
+  }, [filters, originalUsers, user]);
+
+  const resetSearch = () => {
+    setIsSearching(false);
+    setFilters({ ageMin: 18, ageMax: 80, popularityMin: 0, popularityMax: 1000, distance: 100, tags: '', orderBy: 'popularity_score', orderDirection: 'DESC' });
+    loadSuggestions();
+  };
+
+  return (
+    <div className="search-container">
+      <div className="search-filters">
+        <h2>Filtres</h2>
+        <div className="filter-group">
+          <label>Âge ({filters.ageMin} - {filters.ageMax} ans)</label>
+          <div className="range-inputs">
+            <input type="number" min="18" max="100" value={filters.ageMin} onChange={(e) => setFilters({...filters, ageMin: e.target.value})} />
+            <span>-</span>
+            <input type="number" min="18" max="100" value={filters.ageMax} onChange={(e) => setFilters({...filters, ageMax: e.target.value})} />
+          </div>
+        </div>
+
+        <div className="filter-group">
+          <label>Fame Rating ({filters.popularityMin} - {filters.popularityMax})</label>
+          <div className="range-inputs">
+            <input type="number" min="0" max="1000" value={filters.popularityMin} onChange={(e) => setFilters({...filters, popularityMin: e.target.value})} />
+            <span>-</span>
+            <input type="number" min="0" max="1000" value={filters.popularityMax} onChange={(e) => setFilters({...filters, popularityMax: e.target.value})} />
+          </div>
+        </div>
+
+        <div className="filter-group">
+          <label>Distance Max ({filters.distance} km)</label>
+          <input className="slider" type="range" min="1" max="500" value={filters.distance} onChange={(e) => setFilters({...filters, distance: e.target.value})} />
+        </div>
+
+        <div className="filter-group">
+          <label>Tags communs (ex: geek,vegan)</label>
+          <input type="text" placeholder="Séparés par virgule" value={filters.tags} onChange={(e) => setFilters({...filters, tags: e.target.value})} />
+        </div>
+
+        <button className="apply-filters-btn" onClick={handleSearch}>Recherche Globale</button>
+        {isSearching && (
+          <button className="apply-filters-btn" style={{ backgroundColor: '#ccc', marginTop: '0.5rem' }} onClick={resetSearch}>Retour aux Suggestions</button>
+        )}
+      </div>
+
+      <div className="search-results">
+        <div className="results-header">
+          <h2>{isSearching ? 'Résultats de recherche' : 'Suggestions Intelligentes'}</h2>
+          
+          <select className="sort-select" value={filters.orderBy} onChange={(e) => setFilters({...filters, orderBy: e.target.value})}>
+            <option value="popularity_score">Trier par Popularité</option>
+            <option value="age">Trier par Âge</option>
+            <option value="location_city">Trier par Localisation</option>
+            <option value="common_tags">Trier par Tags communs</option>
+          </select>
+        </div>
+
+        {loading ? (
+          <div className="loading-spinner">Recherche de profils...</div>
+        ) : (
+          <div className="users-grid">
+            {displayedUsers.length > 0 ? (
+              displayedUsers.map(u => <UserCard key={u.id} user={u} />)
+            ) : (
+              <p style={{ gridColumn: "1 / -1", textAlign: "center", color: "#666" }}>Aucun profil ne correspond à vos critères.</p>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default Search;
+
+=== FILE: ./frontend/src/pages/VerifyEmail.jsx ===
+
+import { useEffect, useState } from 'react';
+import { useParams, Link } from 'react-router-dom';
+import API_URL from '../config/api';
+import '../assets/css/login.css'; 
+
+function VerifyEmail() {
+  const { token } = useParams();
+  const [status, setStatus] = useState('loading'); 
+  const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    const verify = async () => {
+      try {
+        const response = await fetch(`${API_URL}/auth/verify/${token}`);
+        const data = await response.json();
+        
+        if (response.ok) {
+          setStatus('success');
+          setMessage(data.message);
+        } else {
+          setStatus('error');
+          setMessage(data.error);
+        }
+      } catch (err) {
+        setStatus('error');
+        setMessage('Une erreur est survenue lors de la vérification.');
+      }
+    };
+    verify();
+  }, [token]);
+
+  return (
+    <div className="login-container">
+      <div className="login-card">
+        <h1>Matcha</h1>
+        <h2>Vérification de l'email</h2>
+        
+        {status === 'loading' && <p>Vérification en cours...</p>}
+        {status === 'success' && <div className="success-message">{message}</div>}
+        {status === 'error' && <div className="error-message">{message}</div>}
+        
+        {status !== 'loading' && (
+          <Link to="/login" style={{ textDecoration: 'none' }}>
+            <button style={{ marginTop: '1rem', width: '100%' }}>Aller à la connexion</button>
+          </Link>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default VerifyEmail;
+
+=== FILE: ./frontend/src/pages/ResetPassword.jsx ===
+
+import { useState } from 'react';
+import { useParams, useNavigate, Link } from 'react-router-dom';
+import API_URL from '../config/api';
+import '../assets/css/login.css';
+
+function ResetPassword() {
+  const { token } = useParams();
+  const navigate = useNavigate();
+  const [passwords, setPasswords] = useState({ newPassword: '', confirmPassword: '' });
+  const [status, setStatus] = useState({ type: '', text: '' });
+  const [loading, setLoading] = useState(false);
+
+  const validatePassword = (pwd) => {
+    const forbiddenWords = ['password', 'coffee', 'love', '123456', 'azerty', 'qwerty'];
+    const lowerPwd = pwd.toLowerCase();
+    if (forbiddenWords.some(word => lowerPwd.includes(word))) return false;
+    const regex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/;
+    return regex.test(pwd);
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    
+    if (passwords.newPassword !== passwords.confirmPassword) {
+      setStatus({ type: 'error', text: 'Les mots de passe ne correspondent pas.' });
+      return;
+    }
+
+    if (!validatePassword(passwords.newPassword)) {
+      setStatus({ type: 'error', text: 'Le mot de passe doit contenir au moins 8 caractères, une majuscule et un chiffre.' });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/auth/reset-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, newPassword: passwords.newPassword })
+      });
+      
+      const data = await response.json();
+      if (response.ok) {
+        setStatus({ type: 'success', text: data.message });
+        setTimeout(() => navigate('/login'), 3000);
+      } else {
+        setStatus({ type: 'error', text: data.error });
+      }
+    } catch (err) {
+      setStatus({ type: 'error', text: 'Erreur serveur.' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="login-container">
+      <div className="login-card">
+        <h1>Matcha</h1>
+        <h2>Nouveau mot de passe</h2>
+        
+        {status.type === 'error' && <div className="error-message">{status.text}</div>}
+        {status.type === 'success' && <div className="success-message">{status.text}</div>}
+
+        <form onSubmit={handleSubmit}>
+          <input
+            type="password"
+            placeholder="Nouveau mot de passe"
+            value={passwords.newPassword}
+            onChange={(e) => setPasswords({...passwords, newPassword: e.target.value})}
+            required
+          />
+          <input
+            type="password"
+            placeholder="Confirmer le mot de passe"
+            value={passwords.confirmPassword}
+            onChange={(e) => setPasswords({...passwords, confirmPassword: e.target.value})}
+            required
+          />
+          <button type="submit" disabled={loading}>
+            {loading ? 'Chargement...' : 'Réinitialiser'}
+          </button>
+        </form>
+        <Link to="/login" className="toggle-auth" style={{ display: 'block', marginTop: '1rem' }}>
+          Retour à la connexion
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+export default ResetPassword;
+
+=== FILE: ./frontend/src/utils/age.js ===
+
+export const calculateAge = (birthDate) => {
+  if (!birthDate) return null;
+  const birth = new Date(birthDate);
+  if (isNaN(birth.getTime())) return null;
+  const today = new Date();
+  let age = today.getFullYear() - birth.getFullYear();
+  const m = today.getMonth() - birth.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) {
+    age--;
+  }
+  return age;
+};
+
+=== FILE: ./frontend/vite.config.js ===
+
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+// https://vite.dev/config/
+export default defineConfig({
+  plugins: [react()],
+})

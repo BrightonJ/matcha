@@ -8,21 +8,16 @@ function NotificationBell() {
   const { notifications, unreadCount, markAsRead, markAllAsRead, deleteNotification } = useNotifications();
   const [isOpen, setIsOpen] = useState(false);
 
-  // Rediriger en fonction du type de notification
   const handleNotificationClick = (notification) => {
-    // Marquer comme lue
     if (!notification.is_read) {
       markAsRead(notification.id);
     }
     
-    // Fermer le dropdown
     setIsOpen(false);
     
-    // Rediriger selon le type
     switch (notification.type) {
       case 'like':
       case 'match':
-        // Rediriger vers le profil de la personne
         if (notification.from_user_id) {
           navigate(`/profile/${notification.from_user_id}`);
         } else {
@@ -30,7 +25,6 @@ function NotificationBell() {
         }
         break;
       case 'message':
-        // Rediriger vers le chat
         if (notification.from_user_id) {
           navigate('/chat');
         } else {
@@ -38,7 +32,6 @@ function NotificationBell() {
         }
         break;
       case 'visit':
-        // Rediriger vers le profil du visiteur
         if (notification.from_user_id) {
           navigate(`/profile/${notification.from_user_id}`);
         } else {

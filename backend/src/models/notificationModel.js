@@ -64,7 +64,7 @@ const notificationModel = {
   // Nettoyer les anciennes notifications (plus de 30 jours)
   async cleanOldNotifications(days = 30) {
     await pool.query(
-      'DELETE FROM notifications WHERE created_at < NOW() - INTERVAL \'$1 days\'',
+      "DELETE FROM notifications WHERE created_at < NOW() - ($1 * INTERVAL '1 day')",
       [days]
     );
   }

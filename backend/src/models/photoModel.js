@@ -77,16 +77,12 @@ const photoModel = {
     
     // Supprimer le fichier physique seulement si ce n'est pas une URL externe
     if (!photo.is_external && photo.url) {
-      const filePath = path.join(__dirname, '../../', photo.url);
+      const relativePath = photo.url.startsWith('/') ? photo.url.substring(1) : photo.url;
+      const filePath = path.join(__dirname, '../../', relativePath);
+      
       fs.unlink(filePath, (err) => {
-        if (err) {
-          console.error(`Erreur lors de la suppression du fichier ${filePath}:`, err);
-        } else {
-          console.log(`✅ Fichier supprimé: ${filePath}`);
-        }
       });
     }
-    
     // Si c'était la photo de profil, en promouvoir une autre
     if (photo.is_profile) {
       const remaining = await pool.query(

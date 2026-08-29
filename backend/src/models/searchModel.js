@@ -107,7 +107,7 @@ async searchUsers(filters, currentUserId) {
     const limit = Math.min(filters.limit || 20, 100);
     const offset = filters.offset || 0;
     
-    const finalValues = [currentUserId, ...values, limit, offset];
+    const finalValues = [...values, limit, offset];
     
     query += ` LIMIT $${nextIndex + 1} OFFSET $${nextIndex + 2}`;
 

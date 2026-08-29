@@ -1,5 +1,6 @@
 import { createContext, useState, useContext, useEffect } from 'react';
 import { useSocket } from './SocketContext';
+import { useLocation } from 'react-router-dom';
 import API_URL from '../config/api';
 
 export const NotificationContext = createContext(null);
@@ -13,12 +14,10 @@ export const NotificationProvider = ({ children }) => {
   const token = localStorage.getItem('token');
   const unreadCount = notifications.filter(n => !n.is_read).length;
 
-  // Écouter les notifications via socket
   useEffect(() => {
     if (!socket) return;
 
     socket.on('notification', (notification) => {
-      console.log('🔔 Nouvelle notification reçue:', notification);
       setNotifications(prev => [notification, ...prev]);
       setToastMessage(notification.content);
       setTimeout(() => setToastMessage(null), 4000);
@@ -29,7 +28,6 @@ export const NotificationProvider = ({ children }) => {
     };
   }, [socket]);
 
-  // Récupérer les notifications existantes
   const fetchNotifications = async () => {
     if (!token) return;
     

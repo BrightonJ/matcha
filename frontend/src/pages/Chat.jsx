@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useSocket } from '../context/SocketContext';
 import API_URL from '../config/api';
 import '../assets/css/chat.css';
@@ -11,16 +12,15 @@ function Chat() {
   const [loading, setLoading] = useState(true);
   const messagesEndRef = useRef(null);
   const socket = useSocket();
+  const location = useLocation();
   
   const token = localStorage.getItem('token');
 
-  // Écouter les événements socket
+  // Gestion des événements WebSockets
   useEffect(() => {
     if (!socket) return;
 
     const handleNewMessage = (message) => {
-      console.log('📩 Nouveau message reçu:', message);
-      
       const otherUserId = message.from_user_id === socket.userId 
         ? message.to_user_id 
         : message.from_user_id;
@@ -40,8 +40,6 @@ function Chat() {
     };
 
     const handleUserStatus = (data) => {
-      console.log('🟢 Statut utilisateur changé (chat):', data);
-      
       setMatches(prev => prev.map(match => 
         match.id === data.userId 
           ? { ...match, is_online: data.isOnline }
@@ -62,7 +60,7 @@ function Chat() {
     };
   }, [socket, activeMatch]);
 
-  // Récupérer les matchs
+  // Récupération de la liste des matchs
   useEffect(() => {
     const fetchMatches = async () => {
       try {
@@ -75,7 +73,7 @@ function Chat() {
           setMatches(data);
         }
       } catch (err) {
-        console.error('Erreur récupération matchs:', err);
+        // Erreur ignorée silencieusement pour la console
       }
     };
     
@@ -84,7 +82,17 @@ function Chat() {
     }
   }, [token]);
 
-  // Récupérer les messages d'une conversation
+  // Ouverture automatique si on vient du profil d'un match (via navigate state)
+  useEffect(() => {
+    if (matches.length > 0 && location.state?.matchId) {
+      const matchToSelect = matches.find(m => m.id === location.state.matchId);
+      if (matchToSelect && (!activeMatch || activeMatch.id !== matchToSelect.id)) {
+        selectMatch(matchToSelect);
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [matches, location.state]);
+
   const fetchConversation = async (userId) => {
     setLoading(true);
     try {
@@ -100,13 +108,12 @@ function Chat() {
         }));
       }
     } catch (err) {
-      console.error('Erreur récupération messages:', err);
+      // Ignoré silencieusement
     } finally {
       setLoading(false);
     }
   };
 
-  // Sélectionner un match
   const selectMatch = async (match) => {
     setActiveMatch(match);
     
@@ -119,7 +126,6 @@ function Chat() {
     }
   };
 
-  // Envoyer un message
   const handleSendMessage = async (e) => {
     e.preventDefault();
     if (!messageText.trim() || !activeMatch || !socket) return;
@@ -142,7 +148,6 @@ function Chat() {
           messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
         }, 100);
       } else if (response && response.error) {
-        console.error('Erreur:', response.error);
         alert(response.error);
       }
     });
@@ -169,8 +174,8 @@ function Chat() {
     return (
       <div className="chat-container">
         <div className="empty-chat">
-          <h3>No matches yet</h3>
-          <p>Start liking profiles to find your coffee partner!</p>
+          <h3>Pas encore de matchs</h3>
+          <p>Commencez à liker des profils pour pouvoir discuter !</p>
         </div>
       </div>
     );
@@ -180,7 +185,7 @@ function Chat() {
     <div className="chat-container">
       <div className="chat-sidebar">
         <div className="chat-sidebar-header">
-          <h2>Your Matches ({matches.length})</h2>
+          <h2>Vos Matchs ({matches.length})</h2>
         </div>
         <div className="matches-list">
           {matches.map(match => (
@@ -196,7 +201,7 @@ function Chat() {
               <div className="match-info">
                 <h4>{match.first_name} {match.last_name}</h4>
                 <p>@{match.username}</p>
-                {match.is_online && <span className="online-status">🟢 En ligne</span>}
+                {match.is_online && <span className="online-badge">🟢 En ligne</span>}
               </div>
             </div>
           ))}
@@ -224,7 +229,7 @@ function Chat() {
             
             <div className="chat-messages">
               {loading ? (
-                <div className="loading-messages">Loading messages...</div>
+                <div className="loading-messages">Chargement de l'historique...</div>
               ) : (
                 <>
                   {(messages[activeMatch.id] || []).map((msg, idx) => (
@@ -244,19 +249,19 @@ function Chat() {
             <form className="chat-input-area" onSubmit={handleSendMessage}>
               <input 
                 type="text" 
-                placeholder="Type a message..." 
+                placeholder="Écrivez un message..." 
                 value={messageText}
                 onChange={(e) => setMessageText(e.target.value)}
               />
               <button type="submit" className="send-btn" disabled={!socket}>
-                Send
+                Envoyer
               </button>
             </form>
           </>
         ) : (
           <div className="empty-chat">
-            <h3>Select a match to start chatting</h3>
-            <p>Brewing connections...</p>
+            <h3>Sélectionnez un match pour discuter</h3>
+            <p>La conversation n'attend plus que vous...</p>
           </div>
         )}
       </div>

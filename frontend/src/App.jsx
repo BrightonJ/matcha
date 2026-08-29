@@ -9,17 +9,23 @@ import Search from './pages/Search';
 import Profile from './pages/Profile';
 import PublicProfile from './pages/PublicProfile';
 import Chat from './pages/Chat';
+import VerifyEmail from './pages/VerifyEmail';
+import ResetPassword from './pages/ResetPassword';
 import './assets/css/global.css';
 
 function App() {
   return (
-    <AuthProvider>
-      <SocketProvider>
-        <NotificationProvider>
-          <BrowserRouter>
+    <BrowserRouter>
+      <AuthProvider>
+        <SocketProvider>
+          <NotificationProvider>
             <Routes>
+              {/* ROUTES PUBLIQUES (NON CONNECTÉ) */}
               <Route path="/login" element={<Login />} />
+              <Route path="/verify/:token" element={<VerifyEmail />} />
+              <Route path="/reset-password/:token" element={<ResetPassword />} />
               
+              {/* ROUTES PRIVÉES (CONNECTÉ) */}
               <Route element={<ProtectedRoute />}>
                 <Route path="/" element={<MainLayout />}>
                   <Route index element={<Navigate to="/search" replace />} />
@@ -31,10 +37,10 @@ function App() {
                 </Route>
               </Route>
             </Routes>
-          </BrowserRouter>
-        </NotificationProvider>
-      </SocketProvider>
-    </AuthProvider>
+          </NotificationProvider>
+        </SocketProvider>
+      </AuthProvider>
+    </BrowserRouter>
   );
 }
 

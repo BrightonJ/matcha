@@ -9,7 +9,7 @@ const transporter = nodemailer.createTransport({
 });
 
 const sendVerificationEmail = async (email, username, verificationToken) => {
-  const verificationUrl = `http://localhost:3000/api/auth/verify/${verificationToken}`;
+  const verificationUrl = `${process.env.FRONTEND_URL}/verify/${verificationToken}`;
   
   const mailOptions = {
     from: `"Matcha" <${process.env.EMAIL_USER}>`,
@@ -32,13 +32,12 @@ const sendVerificationEmail = async (email, username, verificationToken) => {
   try {
     await transporter.sendMail(mailOptions);
   } catch (error) {
-    console.error(error);
     throw error;
   }
 };
 
 const sendPasswordResetEmail = async (email, username, resetToken) => {
-  const resetUrl = `http://localhost:5173/reset-password/${resetToken}`;
+  const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
   
   const mailOptions = {
     from: `"Matcha" <${process.env.EMAIL_USER}>`,
@@ -58,7 +57,6 @@ const sendPasswordResetEmail = async (email, username, resetToken) => {
   try {
     await transporter.sendMail(mailOptions);
   } catch (error) {
-    console.error(error);
     throw error;
   }
 };

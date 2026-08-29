@@ -100,7 +100,6 @@ const getMatches = async (req, res) => {
   }
 };
 
-// Vérifier si j'ai liké un utilisateur
 const checkLike = async (req, res) => {
   try {
     const { userId } = req.params;
@@ -110,10 +109,11 @@ const checkLike = async (req, res) => {
       return res.status(400).json({ error: 'ID utilisateur invalide' });
     }
     
-    const exists = await like.exists(req.userId, toUserId);
-    res.json({ liked: exists });
+    const liked = await like.exists(req.userId, toUserId);
+    const likesMe = await like.exists(toUserId, req.userId); // Vérifie si l'autre t'a liké
+    
+    res.json({ liked, likesMe });
   } catch (error) {
-    console.error('Erreur:', error);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 };

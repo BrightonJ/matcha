@@ -1,28 +1,23 @@
 const { user: userModel, tag: tagModel } = require('../models');
 
-// Récupérer tous les tags disponibles
 const getAllTags = async (req, res) => {
   try {
     const tags = await tagModel.getAll();
     res.json(tags);
   } catch (error) {
-    console.error('Erreur:', error);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 };
 
-// Récupérer les tags de l'utilisateur
 const getMyTags = async (req, res) => {
   try {
     const tags = await tagModel.getUserTags(req.userId);
     res.json(tags);
   } catch (error) {
-    console.error('Erreur:', error);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 };
 
-// Ajouter un tag à l'utilisateur
 const addTag = async (req, res) => {
   try {
     const { tagName } = req.body;
@@ -31,27 +26,29 @@ const addTag = async (req, res) => {
       return res.status(400).json({ error: 'tagName requis' });
     }
     
-    // Chercher le tag par son nom
-    const tag = await tagModel.findByName(tagName);
-    
-    if (!tag) {
-      return res.status(404).json({ error: 'Tag non trouvé' });
+    const normalizedTagName = tagName.trim().toLowerCase();
+
+    if (!/^[a-z0-9]+$/.test(normalizedTagName)) {
+      return res.status(400).json({ error: 'Le tag ne doit contenir que des lettres et des chiffres, sans espace ni ponctuation.' });
     }
     
-    const result = await tagModel.addToUser(req.userId, tag.id);  // ← corrigé
+    let tag = await tagModel.findByName(normalizedTagName);
+    if (!tag) {
+      tag = await tagModel.create(normalizedTagName);
+    }
+    
+    const result = await tagModel.addToUser(req.userId, tag.id);
     
     if (!result) {
       return res.status(400).json({ error: 'Tag déjà ajouté' });
     }
     
-    res.json({ message: `Tag "${tagName}" ajouté avec succès` });
+    res.json({ message: `Tag "${normalizedTagName}" ajouté avec succès` });
   } catch (error) {
-    console.error('Erreur:', error);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 };
 
-// Supprimer un tag de l'utilisateur
 const removeTag = async (req, res) => {
   try {
     const { tagName } = req.params;
@@ -60,14 +57,13 @@ const removeTag = async (req, res) => {
       return res.status(400).json({ error: 'tagName requis' });
     }
     
-    // Chercher le tag par son nom
-    const tag = await tagModel.findByName(tagName);  // ← mieux
+    const tag = await tagModel.findByName(tagName);
     
     if (!tag) {
       return res.status(404).json({ error: 'Tag non trouvé' });
     }
     
-    const result = await tagModel.removeFromUser(req.userId, tag.id);  // ← corrigé
+    const result = await tagModel.removeFromUser(req.userId, tag.id);
     
     if (!result) {
       return res.status(404).json({ error: 'Tag non trouvé sur ce profil' });
@@ -75,12 +71,10 @@ const removeTag = async (req, res) => {
     
     res.json({ message: `Tag "${tagName}" supprimé avec succès` });
   } catch (error) {
-    console.error('Erreur:', error);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 };
 
-// Récupérer les tags d'un autre utilisateur
 const getUserTags = async (req, res) => {
   try {
     const { id } = req.params;
@@ -90,7 +84,6 @@ const getUserTags = async (req, res) => {
       return res.status(400).json({ error: 'ID utilisateur invalide' });
     }
     
-    // Vérifier si l'utilisateur existe
     const user = await userModel.findById(userId);
     if (!user) {
       return res.status(404).json({ error: 'Utilisateur non trouvé' });
@@ -99,7 +92,6 @@ const getUserTags = async (req, res) => {
     const tags = await tagModel.getUserTags(userId);
     res.json(tags);
   } catch (error) {
-    console.error('Erreur:', error);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 };

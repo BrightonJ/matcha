@@ -1,130 +1,244 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 import API_URL from '../config/api';
 import { calculateAge } from '../utils/age';
 import '../assets/css/publicProfile.css';
-import { useNotifications } from '../context/NotificationContext';
 
-function PublicProfileProd() {
+function PublicProfile() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { triggerToast } = useNotifications();
+  const { user: currentUser } = useAuth();
   
-  const [user, setUser] = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [photos, setPhotos] = useState([]);
+  const [isLiked, setIsLiked] = useState(false);
+  const [likesMe, setLikesMe] = useState(false);
+  const [isBlocked, setIsBlocked] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [isLikedByMe, setIsLikedByMe] = useState(false);
+  const [error, setError] = useState(null);
+
   const token = localStorage.getItem('token');
 
-  const getPhotoUrl = (photoUrl, isExternal) => {
-    if (!photoUrl) return `https://ui-avatars.com/api/?background=8baa5e&color=fff&size=300&name=${user?.username || 'User'}`;
-    if (isExternal) return photoUrl;
-    return `${API_URL.replace('/api', '')}${photoUrl}`;
-  };
-
   useEffect(() => {
-    fetch(`${API_URL}/profile/${id}`, { headers: { 'Authorization': `Bearer ${token}` } })
-      .then(res => {
-        if (!res.ok) throw new Error("Profil introuvable");
-        return res.json();
-      })
-      .then(data => {
-        setUser(data);
+    if (parseInt(id) === currentUser?.id) {
+      navigate('/profile');
+      return;
+    }
+
+    const fetchProfileData = async () => {
+      try {
+        setLoading(true);
+        const profileRes = await fetch(`${API_URL}/profile/${id}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (!profileRes.ok) throw new Error('Profil indisponible ou bloqué');
+        const profileData = await profileRes.json();
+        setProfile(profileData);
+
+        const photosRes = await fetch(`${API_URL}/photos/user/${id}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (photosRes.ok) {
+          const photosData = await photosRes.json();
+          setPhotos(photosData);
+        }
+
+        const likeRes = await fetch(`${API_URL}/likes/check/${id}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (likeRes.ok) {
+          const likeData = await likeRes.json();
+          setIsLiked(likeData.liked);
+          setLikesMe(likeData.likesMe);
+        }
+
+        const blockRes = await fetch(`${API_URL}/blocks/check/${id}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (blockRes.ok) {
+          const blockData = await blockRes.json();
+          setIsBlocked(blockData.blocked);
+        }
+
+      } catch (err) {
+        setError(err.message);
+      } finally {
         setLoading(false);
-      })
-      .catch(() => navigate('/search'));
+      }
+    };
 
-    fetch(`${API_URL}/likes/check/${id}`, { headers: { 'Authorization': `Bearer ${token}` } })
-      .then(res => res.json())
-      .then(data => setIsLikedByMe(data.liked))
-      .catch(err => console.error(err));
-  }, [id, token, navigate]);
+    if (id && token) {
+      fetchProfileData();
+    }
+  }, [id, token, currentUser, navigate]);
 
-  const handleLikeToggle = async () => {
+  const handleLike = async () => {
     try {
-      const method = isLikedByMe ? 'DELETE' : 'POST';
+      const method = isLiked ? 'DELETE' : 'POST';
       const response = await fetch(`${API_URL}/likes/${id}`, {
-        method,
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
+        method: method,
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
       });
       
       if (response.ok) {
-        setIsLikedByMe(!isLikedByMe);
+        setIsLiked(!isLiked);
         const data = await response.json();
-        if (data.match) alert(`🎉 C'est un match avec ${user.first_name} !`);
+        if (data.match) {
+          alert(`❤️ C'est un match avec ${profile.username} !`);
+        }
+      } else {
+        const errorData = await response.json();
+        alert(errorData.error);
       }
     } catch (err) {
-      alert("Erreur lors du like.");
+      alert("Une erreur est survenue.");
     }
   };
 
   const handleBlock = async () => {
-    await fetch(`${API_URL}/blocks/${id}`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
-    alert('🚫 Utilisateur bloqué.');
-    navigate('/search');
-  };
-
-  const handleReport = async () => {
-    if (window.confirm("Voulez-vous vraiment signaler cet utilisateur comme faux compte ?")) {
-      try {
-        const response = await fetch(`${API_URL}/reports/${id}`, {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const data = await response.json();
-        
-        if (response.ok) {
-          triggerToast("Utilisateur signalé avec succès.");
-        } else {
-          triggerToast(data.error || "Erreur lors du signalement.");
-        }
-      } catch (err) {
-        triggerToast("Erreur serveur lors du signalement.");
+    if (!window.confirm("Voulez-vous vraiment bloquer cet utilisateur ? Il disparaîtra de vos résultats.")) return;
+    
+    try {
+      const response = await fetch(`${API_URL}/blocks/${id}`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.ok) {
+        alert("Utilisateur bloqué.");
+        navigate('/search');
       }
+    } catch (err) {
+      alert("Erreur lors du blocage.");
     }
   };
 
-  if (loading) return <div className="public-profile-container" style={{ textAlign: 'center', padding: '3rem' }}>Recherche du profil en cours...</div>;
-  if (!user) return null;
+  const handleReport = async () => {
+    if (!window.confirm("Signaler ce profil comme faux compte ?")) return;
+    
+    try {
+      const response = await fetch(`${API_URL}/reports/${id}`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.ok) {
+        alert("Profil signalé à l'administration.");
+      }
+    } catch (err) {
+      alert("Erreur lors du signalement.");
+    }
+  };
 
-  const age = calculateAge(user.birth_date);
+  const getPhotoUrl = (photoUrl, isExternal) => {
+    if (!photoUrl) return '/default-avatar.png';
+    if (isExternal) return photoUrl;
+    return `${API_URL.replace('/api', '')}${photoUrl}`;
+  };
+
+  const formatLastSeen = (dateString) => {
+    if (!dateString) return "Inconnue";
+    const date = new Date(dateString);
+    return date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  };
+
+  if (loading) return <div className="loading-spinner">Chargement du profil...</div>;
+  if (error) return <div className="error-message">{error}</div>;
+  if (!profile) return <div className="error-message">Profil introuvable.</div>;
+
+  const age = calculateAge(profile.birth_date);
+  const isMatch = isLiked && likesMe;
 
   return (
     <div className="public-profile-container">
       <div className="profile-header-main">
         <div className="profile-name-area">
-          <h2>{user.first_name} {user.last_name} ({age}) <span className="fame-badge">🔥 {user.popularity_score || 0} Fame</span></h2>
-          <p>@{user.username}</p>
-          {user.is_online ? <p className="status-text status-online">🟢 En ligne</p> : <p className="status-text status-offline">⚪ Hors ligne</p>}
+          <h2>
+            {profile.first_name} {profile.last_name} ({age} ans)
+            <span className="fame-badge">🔥 {profile.popularity_score} Fame</span>
+          </h2>
+          <p>@{profile.username}</p>
+          <div className="status-text">
+            {profile.is_online ? (
+              <span className="status-online">🟢 En ligne</span>
+            ) : (
+              <span className="status-offline">⚪ Hors ligne (Vu le {formatLastSeen(profile.last_seen)})</span>
+            )}
+          </div>
         </div>
       </div>
 
       <div className="interaction-bar">
-        <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-          <button className={`action-btn ${isLikedByMe ? 'btn-unlike' : 'btn-like'}`} onClick={handleLikeToggle}>
-            {isLikedByMe ? '💔 Unlike' : '❤️ Like'}
-          </button>
+        <div className="like-status-info">
+          {isMatch ? (
+            <span className="like-status-badge">💖 C'est un Match !</span>
+          ) : likesMe ? (
+            <span className="like-status-badge" style={{ backgroundColor: '#ffe4e6', color: '#e91e63', borderColor: '#e91e63' }}>
+              Cette personne vous a liké !
+            </span>
+          ) : null}
         </div>
-        <div className="danger-actions">
-          <button className="action-btn btn-danger" onClick={handleReport}>🚩 Signaler</button>
-          <button className="action-btn btn-danger" onClick={handleBlock}>🚫 Bloquer</button>
+
+        <div className="action-buttons">
+          {!isBlocked && (
+            <button className={`action-btn ${isLiked ? 'btn-unlike' : 'btn-like'}`} onClick={handleLike}>
+              {isLiked ? '💔 Retirer le like' : '🤍 Liker'}
+            </button>
+          )}
+          {isMatch && (
+            <button 
+              className="action-btn btn-chat" 
+              onClick={() => navigate('/chat', { state: { matchId: parseInt(id) } })} 
+              style={{ marginLeft: '10px' }}
+            >
+              💬 Discuter
+            </button>
+          )}
         </div>
       </div>
 
-      <div className="public-photos" style={{ textAlign: 'center' }}>
-         <img src={getPhotoUrl(user.profile_photo, user.photo_is_external)} alt="Profil" style={{ width: '100%', maxWidth: '300px', borderRadius: '50%', border: '4px solid var(--color-sunlight)', objectFit: 'cover', aspectRatio: '1/1' }} />
+      <div className="public-photos">
+        {photos.length > 0 ? (
+          <img src={getPhotoUrl(photos.find(p => p.is_profile)?.url || photos[0].url, photos.find(p => p.is_profile)?.is_external || photos[0].is_external)} alt="Profile" />
+        ) : (
+          <div className="no-photo">Aucune photo</div>
+        )}
       </div>
 
       <div className="info-block">
         <h3>📍 Localisation</h3>
-        <p>{user.location_city || 'Localisation inconnue'}</p>
+        <p>{profile.location_city || 'Lieu inconnu'}</p>
       </div>
 
       <div className="info-block">
         <h3>📖 Biographie</h3>
-        <p>{user.bio || "Cette personne préfère garder le mystère..."}</p>
+        <p>{profile.bio || 'Cet utilisateur n\'a pas encore de bio.'}</p>
+      </div>
+
+      <div className="info-block">
+        <h3>🏷️ Intérêts</h3>
+        <div className="tags-container">
+          {profile.tags && profile.tags.length > 0 ? (
+            profile.tags.map((tag, i) => (
+              <span key={i} className="tag">{tag}</span>
+            ))
+          ) : (
+            <p>Aucun intérêt renseigné.</p>
+          )}
+        </div>
+      </div>
+
+      <div className="danger-actions" style={{ marginTop: '3rem', borderTop: '1px solid #eee', paddingTop: '1rem' }}>
+        <button className="action-btn btn-danger" onClick={handleBlock}>🚫 Bloquer</button>
+        <button className="action-btn btn-danger" onClick={handleReport}>⚠️ Signaler un faux profil</button>
       </div>
     </div>
   );
 }
 
-export default PublicProfileProd;
+export default PublicProfile;

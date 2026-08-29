@@ -180,7 +180,6 @@ async function generateUsers(count, existingTags) {
     }
 
     if ((i + 1) % 50 === 0) {
-      console.log(`📦 ${i + 1}/${count} utilisateurs créés...`);
     }
   }
 
@@ -191,28 +190,17 @@ async function generateUsers(count, existingTags) {
 
 async function seed() {
   try {
-    console.log('🌱 Suppression des données existantes...');
+
     
     await pool.query('TRUNCATE TABLE user_tags, photos, likes, visits, messages, notifications, blocks, users CASCADE');
-    console.log('✅ Données supprimées');
 
-    console.log('📋 Récupération des tags...');
     const existingTags = await getExistingTags();
-    console.log(`✅ ${existingTags.length} tags disponibles`);
 
-    console.log('👥 Génération des 500 utilisateurs de test...');
     const users = await generateUsers(500, existingTags);
-    console.log(`✅ ${users.length} utilisateurs créés avec succès !`);
 
     const totalUsers = await pool.query('SELECT COUNT(*) as total FROM users');
     const usersWithPhotos = await pool.query('SELECT COUNT(DISTINCT user_id) as total FROM photos');
     const usersWithTags = await pool.query('SELECT COUNT(DISTINCT user_id) as total FROM user_tags');
-    
-    console.log('\n📊 Statistiques:');
-    console.log(`   - Total utilisateurs: ${totalUsers.rows[0].total}`);
-    console.log(`   - Utilisateurs avec photos: ${usersWithPhotos.rows[0].total}`);
-    console.log(`   - Utilisateurs avec tags: ${usersWithTags.rows[0].total}`);
-
   } catch (error) {
     console.error('❌ Erreur lors du seeding:', error);
   } finally {

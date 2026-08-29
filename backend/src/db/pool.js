@@ -16,7 +16,6 @@ pool.connect((err, client, release) => {
   if (err) {
     console.error("❌ Erreur de connexion à PostgreSQL:", err.message);
   } else {
-    console.log("✅ Connecté à PostgreSQL");
     release();
   }
 });

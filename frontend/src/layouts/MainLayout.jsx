@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Outlet, Link, useNavigate } from 'react-router-dom';
+import { Outlet, Link, useNavigate, useLocation, Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useNotifications } from '../context/NotificationContext';
 import NotificationBell from '../components/NotificationBell';
@@ -9,15 +9,28 @@ import '../assets/css/notification.css';
 
 function MainLayout() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user, logout } = useAuth();
   const { toastMessage } = useNotifications();
   
-  // Nouveaux états pour gérer l'UI
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
   const dropdownRef = useRef(null);
 
-  // Fermer le dropdown si on clique en dehors
+  const isProfileIncomplete = user && (
+    !user.gender || 
+    !user.bio || 
+    !user.birth_date || 
+    !user.location_city || 
+    !user.profile_photo || 
+    !user.tags || 
+    user.tags.length === 0
+  );
+
+  if (isProfileIncomplete && location.pathname !== '/profile') {
+    return <Navigate to="/profile" replace />;
+  }
+
   useEffect(() => {
     function handleClickOutside(event) {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
@@ -38,12 +51,12 @@ function MainLayout() {
     <div className="layout-container">
       <header className="navbar">
         <div className="nav-brand">
-          <Link to="/search">Matcha Cafe</Link>
+          <Link to="/search">Matcha</Link>
         </div>
         
         <div className="nav-links">
-          <Link to="/search">Search</Link>
-          <Link to="/chat">Chat</Link>
+          <Link to="/search">Recherche</Link>
+          <Link to="/chat">Messages</Link>
           <NotificationBell />
           
           {user && (
@@ -55,17 +68,16 @@ function MainLayout() {
                 <Avatar user={user} size="sm" />
               </div>
 
-              {/* Menu déroulant */}
               {isDropdownOpen && (
                 <div className="avatar-dropdown">
                   <div className="dropdown-header">
                     <strong>{user.username}</strong>
                   </div>
                   <button onClick={() => { setIsDropdownOpen(false); navigate('/profile'); }}>
-                    ⚙️ Settings
+                    ⚙️ Paramètres
                   </button>
                   <button className="dropdown-logout" onClick={() => { setIsDropdownOpen(false); setIsLogoutModalOpen(true); }}>
-                    🚪 Logout
+                    🚪 Déconnexion
                   </button>
                 </div>
               )}
@@ -75,11 +87,16 @@ function MainLayout() {
       </header>
       
       <main className="main-content">
+        {isProfileIncomplete && location.pathname === '/profile' && (
+          <div style={{ backgroundColor: '#ff9800', color: 'white', padding: '1rem', textAlign: 'center', fontWeight: 'bold' }}>
+            ⚠️ Vous devez remplir TOUTES vos informations (Bio, Genre, Localisation, au moins 1 Tag et 1 Photo) pour utiliser le site.
+          </div>
+        )}
         <Outlet />
       </main>
       
       <footer className="footer">
-        <p>© 2026 Matcha Cafe. Brewed with love.</p>
+        <p>© 2026 Matcha. Parce que l'amour aussi, ça s'industrialise.</p>
       </footer>
 
       {toastMessage && (
@@ -88,18 +105,17 @@ function MainLayout() {
         </div>
       )}
 
-      {/* Pop-up de confirmation de déconnexion */}
       {isLogoutModalOpen && (
         <div className="modal-overlay">
           <div className="modal-content">
-            <h3>Leaving so soon? ☕</h3>
-            <p>Are you sure you want to logout?</p>
+            <h3>Partir si tôt ? ☕</h3>
+            <p>Voulez-vous vraiment vous déconnecter ?</p>
             <div className="modal-actions">
               <button className="btn-cancel" onClick={() => setIsLogoutModalOpen(false)}>
-                Not yet
+                Non, annuler
               </button>
               <button className="btn-confirm" onClick={handleLogoutConfirm}>
-                Yes, logout
+                Oui, me déconnecter
               </button>
             </div>
           </div>
