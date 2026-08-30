@@ -1,16 +1,25 @@
-const { search: searchModel } = require('../models');
+const { search: searchModel, user: userModel } = require('../models');
 
 const searchUsers = async (req, res) => {
   try {
+    const user = await userModel.findById(req.userId);
+    
+    let preferredGenders = ['male', 'female', 'other'];
+    if (user.sexual_preferences === 'male') {
+      preferredGenders = ['male'];
+    } else if (user.sexual_preferences === 'female') {
+      preferredGenders = ['female'];
+    }
+
     const filters = {
       ageMin: req.query.ageMin ? parseInt(req.query.ageMin) : null,
       ageMax: req.query.ageMax ? parseInt(req.query.ageMax) : null,
-      preferences: req.query.preferences ? [req.query.preferences] : null,
+      preferences: preferredGenders,
       latitude: req.query.latitude ? parseFloat(req.query.latitude) : null,
       longitude: req.query.longitude ? parseFloat(req.query.longitude) : null,
       distance: req.query.distance ? parseFloat(req.query.distance) : null,
-      popularityMin: req.query.popularityMin ? parseFloat(req.query.popularityMin) : null,
-      popularityMax: req.query.popularityMax ? parseFloat(req.query.popularityMax) : null,
+      popularityMin: req.query.popularityMin !== undefined && req.query.popularityMin !== '' ? parseFloat(req.query.popularityMin) : null,
+      popularityMax: req.query.popularityMax !== undefined && req.query.popularityMax !== '' ? parseFloat(req.query.popularityMax) : null,
       tags: req.query.tags ? req.query.tags.split(',') : null,
       orderBy: req.query.orderBy || 'popularity_score',
       orderDirection: req.query.orderDirection || 'DESC',
@@ -34,7 +43,8 @@ const searchUsers = async (req, res) => {
 const getSuggestions = async (req, res) => {
   try {
     const limit = req.query.limit ? parseInt(req.query.limit) : 20;
-    const suggestions = await searchModel.getSuggestions(req.userId, limit);
+    const offset = req.query.offset ? parseInt(req.query.offset) : 0;
+    const suggestions = await searchModel.getSuggestions(req.userId, limit, offset);
     
     res.json({
       suggestions,

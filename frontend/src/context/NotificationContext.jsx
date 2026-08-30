@@ -10,6 +10,7 @@ export const NotificationProvider = ({ children }) => {
   const [toastMessage, setToastMessage] = useState(null);
   const [loading, setLoading] = useState(true);
   const socket = useSocket();
+  const location = useLocation();
 
   const token = localStorage.getItem('token');
   const unreadCount = notifications.filter(n => !n.is_read).length;
@@ -17,16 +18,21 @@ export const NotificationProvider = ({ children }) => {
   useEffect(() => {
     if (!socket) return;
 
-    socket.on('notification', (notification) => {
+    const handleNotification = (notification) => {
       setNotifications(prev => [notification, ...prev]);
-      setToastMessage(notification.content);
-      setTimeout(() => setToastMessage(null), 4000);
-    });
+      
+      if (!(notification.type === 'message' && location.pathname === '/chat')) {
+        setToastMessage(notification.content);
+        setTimeout(() => setToastMessage(null), 4000);
+      }
+    };
+
+    socket.on('notification', handleNotification);
 
     return () => {
-      socket.off('notification');
+      socket.off('notification', handleNotification);
     };
-  }, [socket]);
+  }, [socket, location.pathname]);
 
   const fetchNotifications = async () => {
     if (!token) return;
@@ -41,7 +47,6 @@ export const NotificationProvider = ({ children }) => {
         setNotifications(data);
       }
     } catch (err) {
-      console.error('Erreur récupération notifications:', err);
     } finally {
       setLoading(false);
     }
@@ -64,7 +69,6 @@ export const NotificationProvider = ({ children }) => {
         );
       }
     } catch (err) {
-      console.error('Erreur marquage lu:', err);
     }
   };
 
@@ -79,7 +83,6 @@ export const NotificationProvider = ({ children }) => {
         setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
       }
     } catch (err) {
-      console.error('Erreur marquage tout lu:', err);
     }
   };
 
@@ -94,7 +97,6 @@ export const NotificationProvider = ({ children }) => {
         setNotifications(prev => prev.filter(n => n.id !== notificationId));
       }
     } catch (err) {
-      console.error('Erreur suppression notification:', err);
     }
   };
 

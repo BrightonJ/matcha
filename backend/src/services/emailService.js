@@ -1,18 +1,42 @@
 const nodemailer = require('nodemailer');
 
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASSWORD,
-  },
-});
+// Variable globale pour stocker le faux transporteur Ethereal sans le recréer à chaque fois
+let devTransporter = null;
+
+// Fonction pour récupérer le transporteur (Ethereal par défaut en dev)
+const getTransporter = async () => {
+  // Si tu as configuré un VRAI compte email dans le .env, il l'utilise
+  if (process.env.EMAIL_USER && process.env.EMAIL_USER !== 'ton_email@gmail.com') {
+    return nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASSWORD,
+      },
+    });
+  }
+
+  // Sinon, création d'un compte de test Ethereal transparent (la meilleure méthode)
+  if (!devTransporter) {
+    const testAccount = await nodemailer.createTestAccount();
+    devTransporter = nodemailer.createTransport({
+      host: "smtp.ethereal.email",
+      port: 587,
+      secure: false,
+      auth: {
+        user: testAccount.user,
+        pass: testAccount.pass,
+      },
+    });
+  }
+  return devTransporter;
+};
 
 const sendVerificationEmail = async (email, username, verificationToken) => {
   const verificationUrl = `${process.env.FRONTEND_URL}/verify/${verificationToken}`;
   
   const mailOptions = {
-    from: `"Matcha" <${process.env.EMAIL_USER}>`,
+    from: '"Matcha" <no-reply@matcha.com>',
     to: email,
     subject: 'Bienvenue sur Matcha - Vérifie ton compte',
     html: `
@@ -30,9 +54,23 @@ const sendVerificationEmail = async (email, username, verificationToken) => {
   };
 
   try {
-    await transporter.sendMail(mailOptions);
+    const transporter = await getTransporter();
+    const info = await transporter.sendMail(mailOptions);
+    
+    console.log("\n=========================================");
+    console.log(`💌 EMAIL DE VÉRIFICATION ENVOYÉ À : ${email}`);
+    
+    // Récupérer le lien magique Ethereal
+    const testUrl = nodemailer.getTestMessageUrl(info);
+    if (testUrl) {
+      console.log(`🔗 CLIQUEZ ICI POUR VOIR L'EMAIL : ${testUrl}`);
+    } else {
+      console.log(`👉 LIEN DIRECT DE VALIDATION : ${verificationUrl}`);
+    }
+    console.log("=========================================\n");
+
   } catch (error) {
-    throw error;
+    console.error("Erreur d'envoi d'email :", error);
   }
 };
 
@@ -40,7 +78,7 @@ const sendPasswordResetEmail = async (email, username, resetToken) => {
   const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
   
   const mailOptions = {
-    from: `"Matcha" <${process.env.EMAIL_USER}>`,
+    from: '"Matcha" <no-reply@matcha.com>',
     to: email,
     subject: 'Réinitialisation de ton mot de passe Matcha',
     html: `
@@ -55,9 +93,22 @@ const sendPasswordResetEmail = async (email, username, resetToken) => {
   };
 
   try {
-    await transporter.sendMail(mailOptions);
+    const transporter = await getTransporter();
+    const info = await transporter.sendMail(mailOptions);
+    
+    console.log("\n=========================================");
+    console.log(`🔐 EMAIL DE RESET ENVOYÉ À : ${email}`);
+    
+    const testUrl = nodemailer.getTestMessageUrl(info);
+    if (testUrl) {
+      console.log(`🔗 CLIQUEZ ICI POUR VOIR L'EMAIL : ${testUrl}`);
+    } else {
+      console.log(`👉 LIEN DIRECT DE RESET : ${resetUrl}`);
+    }
+    console.log("=========================================\n");
+
   } catch (error) {
-    throw error;
+    console.error("Erreur d'envoi d'email :", error);
   }
 };
 

@@ -10,28 +10,29 @@ export const AuthProvider = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const checkLoggedIn = async () => {
-      const token = localStorage.getItem('token');
-      if (token) {
-        try {
-          const response = await fetch(`${API_URL}/profile/me`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-          });
-          if (response.ok) {
-            const userData = await response.json();
-            setUser(userData);
-            setIsAuthenticated(true);
-          } else {
-            logout();
-          }
-        } catch (error) {
+  const fetchUser = async () => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      try {
+        const response = await fetch(`${API_URL}/profile/me`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (response.ok) {
+          const userData = await response.json();
+          setUser(userData);
+          setIsAuthenticated(true);
+        } else {
           logout();
         }
+      } catch (error) {
+        logout();
       }
-      setLoading(false);
-    };
-    checkLoggedIn();
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    fetchUser();
   }, []);
 
   const login = async (username, password) => {
@@ -43,9 +44,11 @@ export const AuthProvider = ({ children }) => {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Erreur');
+      
       localStorage.setItem('token', data.token);
-      setUser(data.user);
-      setIsAuthenticated(true);
+      
+      await fetchUser();
+      
       return { success: true };
     } catch (error) {
       return { success: false, error: error.message };
@@ -74,7 +77,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated, loading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, isAuthenticated, loading, login, register, logout, refreshUser: fetchUser }}>
       {children}
     </AuthContext.Provider>
   );

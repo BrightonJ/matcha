@@ -1,8 +1,8 @@
 const { Server } = require('socket.io');
-const { message, notification, user, like } = require('../models'); // <-- AJOUT DE 'like'
+const { message, notification, user, like } = require('../models');
 
 let io;
-const disconnectTimeouts = {}; 
+const userSockets = {};
 
 function initSocket(server) {
   io = new Server(server, {
@@ -25,13 +25,15 @@ function initSocket(server) {
   });
   
   io.on('connection', async (socket) => {
-    if (disconnectTimeouts[socket.userId]) {
-      clearTimeout(disconnectTimeouts[socket.userId]);
-      delete disconnectTimeouts[socket.userId];
+    if (!userSockets[socket.userId]) {
+      userSockets[socket.userId] = new Set();
     }
+    userSockets[socket.userId].add(socket.id);
 
-    await user.updateOnlineStatus(socket.userId, true);
-    io.emit('user_status', { userId: socket.userId, isOnline: true });
+    if (userSockets[socket.userId].size === 1) {
+      await user.updateOnlineStatus(socket.userId, true);
+      io.emit('user_status', { userId: socket.userId, isOnline: true });
+    }
     
     socket.join(`user:${socket.userId}`);
     
@@ -44,7 +46,6 @@ function initSocket(server) {
           return;
         }
 
-        // SÉCURITÉ ABSOLUE : Vérifier le match directment dans le socket
         const isMatch = await like.isMatch(socket.userId, toUserId);
         if (!isMatch) {
           if (callback) callback({ error: 'Vous devez être matché pour envoyer un message' });
@@ -77,12 +78,15 @@ function initSocket(server) {
       }
     });
     
-    socket.on('disconnect', () => {
-      disconnectTimeouts[socket.userId] = setTimeout(async () => {
-        await user.updateOnlineStatus(socket.userId, false);
-        io.emit('user_status', { userId: socket.userId, isOnline: false });
-        delete disconnectTimeouts[socket.userId];
-      }, 5000);
+    socket.on('disconnect', async () => {
+      if (userSockets[socket.userId]) {
+        userSockets[socket.userId].delete(socket.id);
+        if (userSockets[socket.userId].size === 0) {
+          delete userSockets[socket.userId];
+          await user.updateOnlineStatus(socket.userId, false);
+          io.emit('user_status', { userId: socket.userId, isOnline: false });
+        }
+      }
     });
   });
   

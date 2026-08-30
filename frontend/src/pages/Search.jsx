@@ -10,22 +10,39 @@ function Search() {
   const [displayedUsers, setDisplayedUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isSearching, setIsSearching] = useState(false);
+  const [offset, setOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  
   const [filters, setFilters] = useState({ 
-    ageMin: 18, ageMax: 80, popularityMin: 0, popularityMax: 1000, distance: 100, tags: '', orderBy: 'popularity_score', orderDirection: 'DESC'
+    ageMin: 18, ageMax: 80, popularityMin: 0, popularityMax: 1000, distance: 5000, tags: '', orderBy: 'popularity_score', orderDirection: 'DESC'
   });
   
   const token = localStorage.getItem('token');
 
-  const loadSuggestions = async () => {
-    setLoading(true);
+  const loadSuggestions = async (loadMore = false) => {
+    if (!loadMore) setLoading(true);
     try {
-      const response = await fetch(`${API_URL}/search/suggestions`, {
+      const currentOffset = loadMore ? offset + 20 : 0;
+      const response = await fetch(`${API_URL}/search/suggestions?limit=20&offset=${currentOffset}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (response.ok) {
         const data = await response.json();
-        setOriginalUsers(data.suggestions || []);
-        setDisplayedUsers(data.suggestions || []);
+        const newUsers = data.suggestions || [];
+        
+        if (loadMore) {
+          setOriginalUsers(prev => {
+            const existingIds = new Set(prev.map(u => u.id));
+            const uniqueNewUsers = newUsers.filter(u => !existingIds.has(u.id));
+            return [...prev, ...uniqueNewUsers];
+          });
+          setOffset(currentOffset);
+        } else {
+          setOriginalUsers(newUsers);
+          setOffset(0);
+        }
+        
+        setHasMore(newUsers.length >= 20);
       }
     } catch (err) {
     } finally {
@@ -35,13 +52,18 @@ function Search() {
 
   useEffect(() => {
     loadSuggestions();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleSearch = async () => {
-    setIsSearching(true);
-    setLoading(true);
+  const handleSearch = async (loadMore = false) => {
+    if (!loadMore) {
+      setIsSearching(true);
+      setLoading(true);
+    }
+    
     try {
-      const searchParams = { ...filters };
+      const currentOffset = loadMore ? offset + 20 : 0;
+      const searchParams = { ...filters, offset: currentOffset, limit: 20 };
       if (user?.latitude && user?.longitude) {
         searchParams.latitude = user.latitude;
         searchParams.longitude = user.longitude;
@@ -51,16 +73,43 @@ function Search() {
       const response = await fetch(`${API_URL}/search?${queryParams}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
+      
       if (response.ok) {
         const data = await response.json();
-        setOriginalUsers(data.users || []);
-        setDisplayedUsers(data.users || []);
+        const newUsers = data.users || [];
+        
+        if (loadMore) {
+          setOriginalUsers(prev => {
+            const existingIds = new Set(prev.map(u => u.id));
+            const uniqueNewUsers = newUsers.filter(u => !existingIds.has(u.id));
+            return [...prev, ...uniqueNewUsers];
+          });
+          setOffset(currentOffset);
+        } else {
+          setOriginalUsers(newUsers);
+          setOffset(0);
+        }
+        
+        setHasMore(newUsers.length >= 20);
       }
     } catch (err) {
     } finally {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    const handleScroll = () => {
+      if (window.innerHeight + document.documentElement.scrollTop >= document.documentElement.offsetHeight - 100) {
+        if (hasMore && !loading) {
+          if (isSearching) handleSearch(true);
+          else loadSuggestions(true);
+        }
+      }
+    };
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, [hasMore, loading, isSearching, offset, filters]);
 
   const calculateLocalDistance = (lat1, lon1, lat2, lon2) => {
     const R = 6371;
@@ -74,7 +123,10 @@ function Search() {
   };
 
   useEffect(() => {
-    if (originalUsers.length === 0) return;
+    if (originalUsers.length === 0) {
+      setDisplayedUsers([]);
+      return;
+    }
 
     let filtered = [...originalUsers];
 
@@ -88,7 +140,7 @@ function Search() {
     
     if (user?.latitude && user?.longitude) {
       filtered = filtered.filter(u => {
-        if (!u.latitude || !u.longitude) return false;
+        if (!u.latitude || !u.longitude) return true;
         const dist = calculateLocalDistance(user.latitude, user.longitude, u.latitude, u.longitude);
         return dist <= Number(filters.distance);
       });
@@ -104,8 +156,7 @@ function Search() {
     }
 
     filtered.sort((a, b) => {
-      let valA = a[filters.orderBy];
-      let valB = b[filters.orderBy];
+      let valA, valB;
       
       if (filters.orderBy === 'common_tags') {
         valA = a.common_tags || 0;
@@ -114,6 +165,12 @@ function Search() {
         valA = a.location_city || '';
         valB = b.location_city || '';
         return filters.orderDirection === 'ASC' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+      } else if (filters.orderBy === 'age') {
+        valA = Number(a.age) || 0;
+        valB = Number(b.age) || 0;
+      } else {
+        valA = Number(a[filters.orderBy]) || 0;
+        valB = Number(b[filters.orderBy]) || 0;
       }
       
       return filters.orderDirection === 'ASC' ? valA - valB : valB - valA;
@@ -124,8 +181,21 @@ function Search() {
 
   const resetSearch = () => {
     setIsSearching(false);
-    setFilters({ ageMin: 18, ageMax: 80, popularityMin: 0, popularityMax: 1000, distance: 100, tags: '', orderBy: 'popularity_score', orderDirection: 'DESC' });
+    setOffset(0);
+    setHasMore(true);
+    setFilters({ ageMin: 18, ageMax: 80, popularityMin: 0, popularityMax: 1000, distance: 5000, tags: '', orderBy: 'popularity_score', orderDirection: 'DESC' });
     loadSuggestions();
+  };
+
+  const handleSortChange = (e) => {
+    const newOrder = e.target.value;
+    if (newOrder === 'age_asc') {
+      setFilters({...filters, orderBy: 'age', orderDirection: 'ASC'});
+    } else if (newOrder === 'age_desc') {
+      setFilters({...filters, orderBy: 'age', orderDirection: 'DESC'});
+    } else {
+      setFilters({...filters, orderBy: newOrder, orderDirection: 'DESC'});
+    }
   };
 
   return (
@@ -152,7 +222,7 @@ function Search() {
 
         <div className="filter-group">
           <label>Distance Max ({filters.distance} km)</label>
-          <input className="slider" type="range" min="1" max="500" value={filters.distance} onChange={(e) => setFilters({...filters, distance: e.target.value})} />
+          <input className="slider" type="range" min="1" max="5000" value={filters.distance} onChange={(e) => setFilters({...filters, distance: e.target.value})} />
         </div>
 
         <div className="filter-group">
@@ -160,7 +230,7 @@ function Search() {
           <input type="text" placeholder="Séparés par virgule" value={filters.tags} onChange={(e) => setFilters({...filters, tags: e.target.value})} />
         </div>
 
-        <button className="apply-filters-btn" onClick={handleSearch}>Recherche Globale</button>
+        <button className="apply-filters-btn" onClick={() => handleSearch(false)}>Recherche Globale</button>
         {isSearching && (
           <button className="apply-filters-btn" style={{ backgroundColor: '#ccc', marginTop: '0.5rem' }} onClick={resetSearch}>Retour aux Suggestions</button>
         )}
@@ -168,26 +238,35 @@ function Search() {
 
       <div className="search-results">
         <div className="results-header">
-          <h2>{isSearching ? 'Résultats de recherche' : 'Suggestions Intelligentes'}</h2>
+          <h2>{isSearching ? 'Résultats de recherche' : 'Suggestions'}</h2>
           
-          <select className="sort-select" value={filters.orderBy} onChange={(e) => setFilters({...filters, orderBy: e.target.value})}>
+          <select className="sort-select" onChange={handleSortChange}>
             <option value="popularity_score">Trier par Popularité</option>
-            <option value="age">Trier par Âge</option>
+            <option value="age_asc">Trier par Âge (Croissant)</option>
+            <option value="age_desc">Trier par Âge (Décroissant)</option>
             <option value="location_city">Trier par Localisation</option>
             <option value="common_tags">Trier par Tags communs</option>
           </select>
         </div>
 
-        {loading ? (
+        {loading && displayedUsers.length === 0 ? (
           <div className="loading-spinner">Recherche de profils...</div>
         ) : (
-          <div className="users-grid">
-            {displayedUsers.length > 0 ? (
-              displayedUsers.map(u => <UserCard key={u.id} user={u} />)
-            ) : (
-              <p style={{ gridColumn: "1 / -1", textAlign: "center", color: "#666" }}>Aucun profil ne correspond à vos critères.</p>
+          <>
+            <div className="users-grid">
+              {displayedUsers.length > 0 ? (
+                displayedUsers.map(u => <UserCard key={u.id} user={u} />)
+              ) : (
+                <p style={{ gridColumn: "1 / -1", textAlign: "center", color: "#666" }}>Aucun profil ne correspond à vos critères.</p>
+              )}
+            </div>
+            
+            {loading && displayedUsers.length > 0 && (
+              <div style={{ textAlign: 'center', margin: '2rem 0', gridColumn: "1 / -1" }}>
+                <p>Chargement des profils suivants...</p>
+              </div>
             )}
-          </div>
+          </>
         )}
       </div>
     </div>

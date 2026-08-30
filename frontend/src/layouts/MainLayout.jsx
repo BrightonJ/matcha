@@ -17,6 +17,16 @@ function MainLayout() {
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
   const dropdownRef = useRef(null);
 
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
   const isProfileIncomplete = user && (
     !user.gender || 
     !user.bio || 
@@ -30,16 +40,6 @@ function MainLayout() {
   if (isProfileIncomplete && location.pathname !== '/profile') {
     return <Navigate to="/profile" replace />;
   }
-
-  useEffect(() => {
-    function handleClickOutside(event) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-        setIsDropdownOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
 
   const handleLogoutConfirm = () => {
     setIsLogoutModalOpen(false);

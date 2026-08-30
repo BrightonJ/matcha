@@ -3224,10 +3224,10 @@ module.exports = { sendVerificationEmail, sendPasswordResetEmail };
 === FILE: ./backend/src/socket/index.js ===
 
 const { Server } = require('socket.io');
-const { message, notification, user, like } = require('../models'); // <-- AJOUT DE 'like'
+const { message, notification, user, like } = require('../models');
 
 let io;
-const disconnectTimeouts = {}; 
+const userSockets = {};
 
 function initSocket(server) {
   io = new Server(server, {
@@ -3250,13 +3250,15 @@ function initSocket(server) {
   });
   
   io.on('connection', async (socket) => {
-    if (disconnectTimeouts[socket.userId]) {
-      clearTimeout(disconnectTimeouts[socket.userId]);
-      delete disconnectTimeouts[socket.userId];
+    if (!userSockets[socket.userId]) {
+      userSockets[socket.userId] = new Set();
     }
+    userSockets[socket.userId].add(socket.id);
 
-    await user.updateOnlineStatus(socket.userId, true);
-    io.emit('user_status', { userId: socket.userId, isOnline: true });
+    if (userSockets[socket.userId].size === 1) {
+      await user.updateOnlineStatus(socket.userId, true);
+      io.emit('user_status', { userId: socket.userId, isOnline: true });
+    }
     
     socket.join(`user:${socket.userId}`);
     
@@ -3269,7 +3271,6 @@ function initSocket(server) {
           return;
         }
 
-        // SÉCURITÉ ABSOLUE : Vérifier le match directment dans le socket
         const isMatch = await like.isMatch(socket.userId, toUserId);
         if (!isMatch) {
           if (callback) callback({ error: 'Vous devez être matché pour envoyer un message' });
@@ -3302,12 +3303,15 @@ function initSocket(server) {
       }
     });
     
-    socket.on('disconnect', () => {
-      disconnectTimeouts[socket.userId] = setTimeout(async () => {
-        await user.updateOnlineStatus(socket.userId, false);
-        io.emit('user_status', { userId: socket.userId, isOnline: false });
-        delete disconnectTimeouts[socket.userId];
-      }, 5000);
+    socket.on('disconnect', async () => {
+      if (userSockets[socket.userId]) {
+        userSockets[socket.userId].delete(socket.id);
+        if (userSockets[socket.userId].size === 0) {
+          delete userSockets[socket.userId];
+          await user.updateOnlineStatus(socket.userId, false);
+          io.emit('user_status', { userId: socket.userId, isOnline: false });
+        }
+      }
     });
   });
   
@@ -3774,6 +3778,7 @@ export const NotificationProvider = ({ children }) => {
   const [toastMessage, setToastMessage] = useState(null);
   const [loading, setLoading] = useState(true);
   const socket = useSocket();
+  const location = useLocation();
 
   const token = localStorage.getItem('token');
   const unreadCount = notifications.filter(n => !n.is_read).length;
@@ -3781,16 +3786,21 @@ export const NotificationProvider = ({ children }) => {
   useEffect(() => {
     if (!socket) return;
 
-    socket.on('notification', (notification) => {
+    const handleNotification = (notification) => {
       setNotifications(prev => [notification, ...prev]);
-      setToastMessage(notification.content);
-      setTimeout(() => setToastMessage(null), 4000);
-    });
+      
+      if (!(notification.type === 'message' && location.pathname === '/chat')) {
+        setToastMessage(notification.content);
+        setTimeout(() => setToastMessage(null), 4000);
+      }
+    };
+
+    socket.on('notification', handleNotification);
 
     return () => {
-      socket.off('notification');
+      socket.off('notification', handleNotification);
     };
-  }, [socket]);
+  }, [socket, location.pathname]);
 
   const fetchNotifications = async () => {
     if (!token) return;
@@ -3805,7 +3815,6 @@ export const NotificationProvider = ({ children }) => {
         setNotifications(data);
       }
     } catch (err) {
-      console.error('Erreur récupération notifications:', err);
     } finally {
       setLoading(false);
     }
@@ -3828,7 +3837,6 @@ export const NotificationProvider = ({ children }) => {
         );
       }
     } catch (err) {
-      console.error('Erreur marquage lu:', err);
     }
   };
 
@@ -3843,7 +3851,6 @@ export const NotificationProvider = ({ children }) => {
         setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
       }
     } catch (err) {
-      console.error('Erreur marquage tout lu:', err);
     }
   };
 
@@ -3858,7 +3865,6 @@ export const NotificationProvider = ({ children }) => {
         setNotifications(prev => prev.filter(n => n.id !== notificationId));
       }
     } catch (err) {
-      console.error('Erreur suppression notification:', err);
     }
   };
 
@@ -3885,7 +3891,6 @@ export const NotificationProvider = ({ children }) => {
 };
 
 export const useNotifications = () => useContext(NotificationContext);
-
 
 === FILE: ./frontend/src/context/OnlineStatusContext.jsx ===
 
@@ -4572,6 +4577,7 @@ function Profile() {
   const [viewers, setViewers] = useState([]);
   const [likers, setLikers] = useState([]);
   const [showPreview, setShowPreview] = useState(false);
+  const [manualCity, setManualCity] = useState('');
 
   const token = localStorage.getItem('token');
 
@@ -4672,7 +4678,6 @@ function Profile() {
     fetchUserPhotos();
     fetchVisitors();
     fetchLikers();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleInputChange = (e) => {
@@ -4808,54 +4813,54 @@ function Profile() {
     setTimeout(() => setMessage({ type: '', text: '' }), 3000);
   };
 
+  const saveLocationToDB = async (lat, lon, cityStr) => {
+    try {
+      const gpsResponse = await fetch(`${API_URL}/location/gps`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ latitude: lat, longitude: lon, city: cityStr })
+      });
+      if (!gpsResponse.ok) throw new Error('Erreur API');
+      setProfileData(prev => ({ ...prev, locationCity: cityStr }));
+      await fetch(`${API_URL}/profile/me`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ ...profileData, locationCity: cityStr })
+      });
+      setMessage({ type: 'success', text: `📍 Localisation mise à jour : ${cityStr}` });
+    } catch (err) {
+      setMessage({ type: 'error', text: '❌ Erreur de sauvegarde' });
+    } finally {
+      setLoading(false);
+      setTimeout(() => setMessage({ type: '', text: '' }), 4000);
+    }
+  };
+
+  const fallbackToIP = async () => {
+    try {
+      const res = await fetch('https://ipapi.co/json/');
+      const data = await res.json();
+      if (data.latitude && data.longitude) {
+        saveLocationToDB(data.latitude, data.longitude, data.city || 'Position IP');
+      } else {
+        throw new Error('IP API failed');
+      }
+    } catch (err) {
+      setMessage({ type: 'error', text: '❌ Impossible de vous localiser.' });
+      setLoading(false);
+      setTimeout(() => setMessage({ type: '', text: '' }), 4000);
+    }
+  };
+
   const handleGetLocation = () => {
     setLoading(true);
     setMessage({ type: 'info', text: '📍 Localisation en cours...' });
-
-    const saveLocationToDB = async (lat, lon, cityStr) => {
-      try {
-        const gpsResponse = await fetch(`${API_URL}/location/gps`, {
-          method: 'PUT',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ latitude: lat, longitude: lon, city: cityStr })
-        });
-        if (!gpsResponse.ok) throw new Error('Erreur API');
-        setProfileData(prev => ({ ...prev, locationCity: cityStr }));
-        await fetch(`${API_URL}/profile/me`, {
-          method: 'PUT',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ ...profileData, locationCity: cityStr })
-        });
-        setMessage({ type: 'success', text: `📍 Localisation mise à jour : ${cityStr}` });
-      } catch (err) {
-        setMessage({ type: 'error', text: '❌ Erreur de sauvegarde' });
-      } finally {
-        setLoading(false);
-        setTimeout(() => setMessage({ type: '', text: '' }), 4000);
-      }
-    };
-
-    const fallbackToIP = async () => {
-      try {
-        const res = await fetch('https://ipapi.co/json/');
-        const data = await res.json();
-        if (data.latitude && data.longitude) {
-          saveLocationToDB(data.latitude, data.longitude, data.city || 'Position IP');
-        } else {
-          throw new Error('IP API failed');
-        }
-      } catch (err) {
-        setMessage({ type: 'error', text: '❌ Impossible de vous localiser.' });
-        setLoading(false);
-        setTimeout(() => setMessage({ type: '', text: '' }), 4000);
-      }
-    };
 
     if ("geolocation" in navigator) {
       navigator.geolocation.getCurrentPosition(
@@ -4882,6 +4887,34 @@ function Profile() {
       );
     } else {
       fallbackToIP();
+    }
+  };
+
+  const handleManualLocationSubmit = async (e) => {
+    e.preventDefault();
+    if (!manualCity.trim()) return;
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/location/manual`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ city: manualCity })
+      });
+      if (response.ok) {
+        setProfileData(prev => ({ ...prev, locationCity: manualCity }));
+        setMessage({ type: 'success', text: `📍 Localisation manuelle définie : ${manualCity}` });
+        setManualCity('');
+      } else {
+        setMessage({ type: 'error', text: '❌ Erreur de sauvegarde' });
+      }
+    } catch (err) {
+      setMessage({ type: 'error', text: '❌ Erreur serveur' });
+    } finally {
+      setLoading(false);
+      setTimeout(() => setMessage({ type: '', text: '' }), 4000);
     }
   };
 
@@ -4948,11 +4981,23 @@ function Profile() {
               </div>
             </div>
             
-            <div className="location-container" style={{ marginTop: '1.5rem' }}>
-              <label>Localisation actuelle : {profileData.locationCity || 'Non définie'}</label>
+            <div className="location-container" style={{ marginTop: '1.5rem', marginBottom: '1.5rem' }}>
+              <label style={{ fontWeight: 'bold' }}>Localisation actuelle : <span style={{ color: '#8A9A5B' }}>{profileData.locationCity || 'Non définie'}</span></label>
               <button type="button" className="gps-btn" onClick={handleGetLocation} disabled={loading}>
-                Mettre à jour ma position GPS
+                📍 Mettre à jour ma position GPS
               </button>
+              <div style={{ marginTop: '1rem', display: 'flex', gap: '0.5rem' }}>
+                <input 
+                  type="text" 
+                  placeholder="Ou entrez une ville manuellement" 
+                  value={manualCity} 
+                  onChange={(e) => setManualCity(e.target.value)} 
+                  style={{ flex: 1, padding: '0.8rem', border: '2px solid #eee', borderRadius: '8px' }}
+                />
+                <button type="button" className="save-btn" style={{ marginTop: 0, width: 'auto' }} onClick={handleManualLocationSubmit} disabled={loading || !manualCity.trim()}>
+                  Valider
+                </button>
+              </div>
             </div>
 
             <button type="submit" className="save-btn" disabled={loading}>Sauvegarder les modifications</button>
@@ -5396,7 +5441,7 @@ function Search() {
     
     if (user?.latitude && user?.longitude) {
       filtered = filtered.filter(u => {
-        if (!u.latitude || !u.longitude) return false;
+        if (!u.latitude || !u.longitude) return true;
         const dist = calculateLocalDistance(user.latitude, user.longitude, u.latitude, u.longitude);
         return dist <= Number(filters.distance);
       });
@@ -5459,7 +5504,7 @@ function Search() {
         </div>
 
         <div className="filter-group">
-          <label>Distance Max ({filters.distance} km)</label>
+          <label>Distance Max ({filters.distance} km) (Base globale)</label>
           <input className="slider" type="range" min="1" max="500" value={filters.distance} onChange={(e) => setFilters({...filters, distance: e.target.value})} />
         </div>
 

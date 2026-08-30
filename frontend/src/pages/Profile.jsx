@@ -5,7 +5,7 @@ import API_URL from '../config/api';
 import '../assets/css/profile.css';
 
 function Profile() {
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('edit');
   const [loading, setLoading] = useState(false);
@@ -23,9 +23,13 @@ function Profile() {
   const [mainPhotoId, setMainPhotoId] = useState(null);
   const [viewers, setViewers] = useState([]);
   const [likers, setLikers] = useState([]);
+  const [sentLikes, setSentLikes] = useState([]);
   const [showPreview, setShowPreview] = useState(false);
+  const [manualCity, setManualCity] = useState('');
 
   const token = localStorage.getItem('token');
+
+  const maxBirthDate = new Date(new Date().setFullYear(new Date().getFullYear() - 18)).toISOString().split('T')[0];
 
   const getPhotoUrl = (photo, isExternal) => {
     if (!photo) return '/default-avatar.png';
@@ -117,6 +121,18 @@ function Profile() {
     } catch (err) {}
   };
 
+  const fetchSentLikes = async () => {
+    try {
+      const response = await fetch(`${API_URL}/likes/sent`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setSentLikes(data);
+      }
+    } catch (err) {}
+  };
+
   useEffect(() => {
     fetchProfile();
     fetchUserTags();
@@ -124,7 +140,7 @@ function Profile() {
     fetchUserPhotos();
     fetchVisitors();
     fetchLikers();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    fetchSentLikes();
   }, []);
 
   const handleInputChange = (e) => {
@@ -143,6 +159,7 @@ function Profile() {
         body: JSON.stringify(profileData)
       });
       if (response.ok) {
+        await refreshUser();
         setMessage({ type: 'success', text: 'Profil mis à jour' });
       } else {
         const data = await response.json();
@@ -174,6 +191,7 @@ function Profile() {
       if (response.ok) {
         setTags([...tags, `#${tagName}`]);
         setSelectedTag('');
+        await refreshUser();
         setMessage({ type: 'success', text: 'Tag ajouté' });
       } else {
         const error = await response.json();
@@ -192,6 +210,7 @@ function Profile() {
       });
       if (response.ok) {
         setTags(tags.filter((_, index) => index !== indexToRemove));
+        await refreshUser();
         setMessage({ type: 'success', text: 'Tag supprimé' });
       }
     } catch (err) {}
@@ -206,6 +225,7 @@ function Profile() {
       return;
     }
     setLoading(true);
+    let uploadedSomething = false;
     for (const file of files) {
       const formData = new FormData();
       formData.append('photo', file);
@@ -219,6 +239,7 @@ function Profile() {
           const data = await response.json();
           setPhotos(prev => [...prev, data.photo]);
           if (data.photo.is_profile) setMainPhotoId(data.photo.id);
+          uploadedSomething = true;
           setMessage({ type: 'success', text: 'Photo ajoutée' });
         } else {
           const error = await response.json();
@@ -226,6 +247,7 @@ function Profile() {
         }
       } catch (err) {}
     }
+    if (uploadedSomething) await refreshUser();
     setLoading(false);
     setTimeout(() => setMessage({ type: '', text: '' }), 3000);
   };
@@ -239,6 +261,7 @@ function Profile() {
       if (response.ok) {
         setMainPhotoId(photoId);
         setPhotos(photos.map(p => ({ ...p, is_profile: p.id === photoId })));
+        await refreshUser();
         setMessage({ type: 'success', text: 'Photo de profil mise à jour' });
       }
     } catch (err) {}
@@ -254,60 +277,62 @@ function Profile() {
       if (response.ok) {
         setPhotos(photos.filter((_, i) => i !== index));
         if (mainPhotoId === photoId) setMainPhotoId(null);
+        await refreshUser();
         setMessage({ type: 'success', text: 'Photo supprimée' });
       }
     } catch (err) {}
     setTimeout(() => setMessage({ type: '', text: '' }), 3000);
   };
 
+  const saveLocationToDB = async (lat, lon, cityStr) => {
+    try {
+      const gpsResponse = await fetch(`${API_URL}/location/gps`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ latitude: lat, longitude: lon, city: cityStr })
+      });
+      if (!gpsResponse.ok) throw new Error('Erreur API');
+      setProfileData(prev => ({ ...prev, locationCity: cityStr }));
+      await fetch(`${API_URL}/profile/me`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ ...profileData, locationCity: cityStr })
+      });
+      await refreshUser();
+      setMessage({ type: 'success', text: `📍 Localisation mise à jour : ${cityStr}` });
+    } catch (err) {
+      setMessage({ type: 'error', text: '❌ Erreur de sauvegarde' });
+    } finally {
+      setLoading(false);
+      setTimeout(() => setMessage({ type: '', text: '' }), 4000);
+    }
+  };
+
+  const fallbackToIP = async () => {
+    try {
+      const res = await fetch('https://ipapi.co/json/');
+      const data = await res.json();
+      if (data.latitude && data.longitude) {
+        saveLocationToDB(data.latitude, data.longitude, data.city || 'Position IP');
+      } else {
+        throw new Error('IP API failed');
+      }
+    } catch (err) {
+      setMessage({ type: 'error', text: '❌ Impossible de vous localiser.' });
+      setLoading(false);
+      setTimeout(() => setMessage({ type: '', text: '' }), 4000);
+    }
+  };
+
   const handleGetLocation = () => {
     setLoading(true);
     setMessage({ type: 'info', text: '📍 Localisation en cours...' });
-
-    const saveLocationToDB = async (lat, lon, cityStr) => {
-      try {
-        const gpsResponse = await fetch(`${API_URL}/location/gps`, {
-          method: 'PUT',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ latitude: lat, longitude: lon, city: cityStr })
-        });
-        if (!gpsResponse.ok) throw new Error('Erreur API');
-        setProfileData(prev => ({ ...prev, locationCity: cityStr }));
-        await fetch(`${API_URL}/profile/me`, {
-          method: 'PUT',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ ...profileData, locationCity: cityStr })
-        });
-        setMessage({ type: 'success', text: `📍 Localisation mise à jour : ${cityStr}` });
-      } catch (err) {
-        setMessage({ type: 'error', text: '❌ Erreur de sauvegarde' });
-      } finally {
-        setLoading(false);
-        setTimeout(() => setMessage({ type: '', text: '' }), 4000);
-      }
-    };
-
-    const fallbackToIP = async () => {
-      try {
-        const res = await fetch('https://ipapi.co/json/');
-        const data = await res.json();
-        if (data.latitude && data.longitude) {
-          saveLocationToDB(data.latitude, data.longitude, data.city || 'Position IP');
-        } else {
-          throw new Error('IP API failed');
-        }
-      } catch (err) {
-        setMessage({ type: 'error', text: '❌ Impossible de vous localiser.' });
-        setLoading(false);
-        setTimeout(() => setMessage({ type: '', text: '' }), 4000);
-      }
-    };
 
     if ("geolocation" in navigator) {
       navigator.geolocation.getCurrentPosition(
@@ -335,6 +360,31 @@ function Profile() {
     } else {
       fallbackToIP();
     }
+  };
+
+  const handleManualLocationSubmit = async (e) => {
+    e.preventDefault();
+    if (!manualCity.trim()) return;
+    setLoading(true);
+    setMessage({ type: 'info', text: '🔍 Recherche de la ville...' });
+    try {
+      const geoRes = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(manualCity)}&format=json&limit=1`);
+      const geoData = await geoRes.json();
+
+      if (geoData && geoData.length > 0) {
+        const { lat, lon, display_name } = geoData[0];
+        const shortName = display_name.split(',')[0];
+        await saveLocationToDB(parseFloat(lat), parseFloat(lon), shortName);
+        setManualCity('');
+      } else {
+        setMessage({ type: 'error', text: '❌ Ville introuvable. Soyez plus précis.' });
+        setLoading(false);
+      }
+    } catch (err) {
+      setMessage({ type: 'error', text: '❌ Erreur serveur' });
+      setLoading(false);
+    }
+    setTimeout(() => setMessage({ type: '', text: '' }), 4000);
   };
 
   return (
@@ -374,8 +424,8 @@ function Profile() {
                 <input type="email" name="email" value={profileData.email} onChange={handleInputChange} required />
               </div>
               <div className="form-group">
-                <label>Date de naissance</label>
-                <input type="date" name="birthDate" value={profileData.birthDate} onChange={handleInputChange} required />
+                <label>Date de naissance (18+)</label>
+                <input type="date" name="birthDate" max={maxBirthDate} value={profileData.birthDate} onChange={handleInputChange} required />
               </div>
               <div className="form-group">
                 <label>Genre</label>
@@ -395,16 +445,29 @@ function Profile() {
                 </select>
               </div>
               <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-                <label>Biographie</label>
-                <textarea name="bio" value={profileData.bio} onChange={handleInputChange} required />
+                <label>Biographie (Max 500 caractères)</label>
+                <textarea name="bio" maxLength="500" value={profileData.bio} onChange={handleInputChange} required />
+                <small style={{ color: '#666', textAlign: 'right', display: 'block' }}>{profileData.bio.length}/500</small>
               </div>
             </div>
             
-            <div className="location-container" style={{ marginTop: '1.5rem' }}>
-              <label>Localisation actuelle : {profileData.locationCity || 'Non définie'}</label>
+            <div className="location-container" style={{ marginTop: '1.5rem', marginBottom: '1.5rem' }}>
+              <label style={{ fontWeight: 'bold' }}>Localisation actuelle : <span style={{ color: '#8A9A5B' }}>{profileData.locationCity || 'Non définie'}</span></label>
               <button type="button" className="gps-btn" onClick={handleGetLocation} disabled={loading}>
-                Mettre à jour ma position GPS
+                📍 Mettre à jour ma position GPS
               </button>
+              <div style={{ marginTop: '1rem', display: 'flex', gap: '0.5rem' }}>
+                <input 
+                  type="text" 
+                  placeholder="Ou cherchez une ville..." 
+                  value={manualCity} 
+                  onChange={(e) => setManualCity(e.target.value)} 
+                  style={{ flex: 1, padding: '0.8rem', border: '2px solid #eee', borderRadius: '8px' }}
+                />
+                <button type="button" className="save-btn" style={{ marginTop: 0, width: 'auto' }} onClick={handleManualLocationSubmit} disabled={loading || !manualCity.trim()}>
+                  Trouver
+                </button>
+              </div>
             </div>
 
             <button type="submit" className="save-btn" disabled={loading}>Sauvegarder les modifications</button>
@@ -475,6 +538,19 @@ function Profile() {
                 </div>
               </div>
             )) : <p className="empty-message">Aucun like pour le moment.</p>}
+          </div>
+
+          <h3 style={{ marginTop: '2rem' }}>Profils que j'ai likés</h3>
+          <div className="history-list">
+            {sentLikes.length > 0 ? sentLikes.map((l, i) => (
+              <div key={i} className="history-item" onClick={() => navigate(`/profile/${l.to_user_id}`)}>
+                <img src={getPhotoUrl(l.profile_photo, false)} alt={l.username} />
+                <div className="history-info">
+                  <h4>{l.first_name}</h4>
+                  <p>@{l.username} - {new Date(l.created_at).toLocaleDateString()}</p>
+                </div>
+              </div>
+            )) : <p className="empty-message">Vous n'avez liké personne pour le moment.</p>}
           </div>
         </div>
       )}
